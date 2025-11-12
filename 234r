@@ -1,23 +1,31 @@
--- Standalone NPC Teleportation Script
+-- Mobile-Enabled NPC Teleportation Script
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local workspace = workspace
 
--- Excluded NPCs that shouldn't be teleported
+-- Mobile detection
+local isMobile = (not UserInputService.KeyboardEnabled)
+
+-- Excluded NPCs
 local EXCLUDED_NPCS = {
-	Landmine = true, Man = true, Turret = true, Stonehedge = true, Sprayer = true,
-	Sentinel = true, Refugee = true, PDC = true, MADS = true, Lifeline = true,
-	Hallucinator = true, Governor = true, FAST_point = true, Barrier = true,
-	Platform = true, Administrator = true
+	Landmine = true, Man = true, Turret = true, Stonehedge = true,
+	Sprayer = true, Sentinel = true, Refugee = true, PDC = true,
+	MADS = true, Lifeline = true, Hallucinator = true, Governor = true,
+	FAST_point = true, Barrier = true, Administrator = true
 }
 
 for i = 1, 11 do
-	if i ~= 8 then
-		EXCLUDED_NPCS["dead guy " .. i] = true
-	end
+	EXCLUDED_NPCS["dead guy " .. i] = true
 end
+
+local config = {
+	enabled = false,
+	throttle = 0.1
+}
+
+local lastTeleportTime = 0
 
 local getHRP = function()
 	local character = LocalPlayer.Character
@@ -63,16 +71,80 @@ local teleportNPCs = function()
 	end
 end
 
--- Main loop with throttling
-local throttle = 0
-
-RunService.Heartbeat:Connect(function(deltaTime)
-	throttle = throttle + deltaTime
+-- Desktop keyboard control
+if not isMobile then
+	local throttle = 0
 	
-	if throttle >= 0.1 then
-		throttle = 0
-		teleportNPCs()
-	end
-end)
+	RunService.Heartbeat:Connect(function(deltaTime)
+		if not config.enabled then
+			return
+		end
+		
+		throttle = throttle + deltaTime
+		
+		if throttle >= config.throttle then
+			throttle = 0
+			teleportNPCs()
+		end
+	end)
+	
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed or input.KeyCode ~= Enum.KeyCode.F1 then
+			return
+		end
+		
+		config.enabled = not config.enabled
+		print("NPC Teleportation " .. (config.enabled and "Enabled" or "Disabled"))
+	end)
+else
+	-- Mobile touch controls
+	local uiAdapter = require(script.Parent:FindFirstChild("mobile_ui_adapter") or game.ServerStorage)
+	
+	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "NPCTeleportMobile"
+	screenGui.ResetOnSpawn = false
+	screenGui.Parent = playerGui
+	
+	-- Toggle button
+	local toggleButton = Instance.new("TextButton")
+	toggleButton.Name = "ToggleButton"
+	toggleButton.Size = UDim2.fromOffset(80, 80)
+	toggleButton.Position = UDim2.fromOffset(10, 10)
+	toggleButton.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+	toggleButton.BackgroundTransparency = 0.6
+	toggleButton.Text = "TP ON"
+	toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	toggleButton.Font = Enum.Font.GothamBold
+	toggleButton.TextSize = 12
+	toggleButton.BorderSizePixel = 0
+	toggleButton.Parent = screenGui
+	
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = toggleButton
+	
+	toggleButton.Activated:Connect(function()
+		config.enabled = not config.enabled
+		toggleButton.Text = config.enabled and "TP ON" or "TP OFF"
+		toggleButton.BackgroundColor3 = config.enabled and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(0, 120, 215)
+	end)
+	
+	-- Main loop
+	local throttle = 0
+	
+	RunService.Heartbeat:Connect(function(deltaTime)
+		if not config.enabled then
+			return
+		end
+		
+		throttle = throttle + deltaTime
+		
+		if throttle >= config.throttle then
+			throttle = 0
+			teleportNPCs()
+		end
+	end)
+end
 
-print("NPC Teleportation script loaded")
+print("NPC Teleportation script loaded" .. (isMobile and " (Mobile)" or ""))
