@@ -59,13 +59,13 @@ pcall(function()
 		local targetParent = humanoid.Parent
 		local startingHealth = humanoid.Health
 		local currentHealth = startingHealth
-		local hitCount = 1
+		local hitCount = 0
 		
 		pcall(function()
 			print("Starting burst multiplier on " .. targetParent.Name .. " (Health: " .. startingHealth .. ")")
 		end)
 		
-		while currentHealth > 0 and hitCount <= MAX_HITS do
+		while currentHealth > 0 and hitCount < MAX_HITS do
 			if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then
 				break
 			end
@@ -78,22 +78,14 @@ pcall(function()
 				if typeof(originalPos) == "Vector3" then
 					local varRange = 0.01
 					local halfVar = varRange / 2
-					local randomX = math.random() * varRange - halfVar
-					local randomY = math.random() * varRange - halfVar
-					local randomZ = math.random() * varRange - halfVar
 					
 					local newPos = Vector3.new(
-						originalPos.X + randomX,
-						originalPos.Y + randomY,
-						originalPos.Z + randomZ
+						originalPos.X + (math.random() * varRange - halfVar),
+						originalPos.Y + (math.random() * varRange - halfVar),
+						originalPos.Z + (math.random() * varRange - halfVar)
 					)
 					
-					local newArgs = {baseArgs[1], baseArgs[2], newPos}
-					for j = 4, #baseArgs do
-						newArgs[j] = baseArgs[j]
-					end
-					
-					remoteObj:FireServer(unpack(newArgs))
+					remoteObj:FireServer(baseArgs[1], baseArgs[2], newPos)
 				else
 					remoteObj:FireServer(unpack(baseArgs))
 				end
