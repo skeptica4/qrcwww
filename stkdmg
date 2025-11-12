@@ -52,15 +52,28 @@ pcall(function()
 	
 	-- Main burst processing function
 	function processBurstTarget(remoteObj, baseArgs, humanoid)
+		if not humanoid or humanoid.Parent == nil then
+			return
+		end
+		
 		local targetParent = humanoid.Parent
-		local npcName = targetParent.Name
+		if not targetParent:IsA("Model") then
+			return
+		end
+		
+		local npcName = targetParent.Name or "Unknown"
 		local startingHealth = humanoid.Health
 		local currentHealth = startingHealth
 		local hitCount = 1
 		
-		print("Starting burst multiplier on " .. npcName .. " (Health: " .. startingHealth .. ")")
+		print("Starting burst multiplier on " .. tostring(npcName) .. " (Health: " .. startingHealth .. ")")
 		
 		while currentHealth > 0 and hitCount <= MAX_HITS do
+			-- Validate target still exists
+			if not humanoid or humanoid.Parent == nil or humanoid.Health <= 0 then
+				break
+			end
+			
 			hitCount = hitCount + 1
 			
 			pcall(function()
