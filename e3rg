@@ -1,1 +1,162 @@
+-- Standalone Gun Modification Script
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
+local LocalPlayer = Players.LocalPlayer
+
+local ALLOWED_GUNS = {
+	"Akimbo", "Voltaic Impact", "Gunslingers", "Burst Rifle", "Stonewall",
+	"Steelforge", "DMR", "Gift of Fire", "Armour Peeler", "Medical Bow",
+	"Recurve", "Vitabow", "Rifle", "Bolter", "Harpoon Gun", "RPG",
+	"Rocket Stormer", "Shockwave Device", "Shotgun", "Hallsweeper",
+	"Sprinter's Streak", "SMG", "Loose Trigger", "Twinface",
+	"Mastermind's Rifle", "Shovel", "Overcharger", "Rallying Cry",
+	"Machete", "Handaxes", "Torqueblade"
+}
+
+-- Configuration
+local config = {
+	firerate = 500,
+	bulletSpeed = 9999,
+	spread = 0,
+	infiniteAmmo = true,
+	reloadTime = 0.1
+}
+
+local lastWeapon = nil
+local reloadCooldown = 0
+
+local getWpn = function()
+	local character = LocalPlayer.Character
+	if not character then
+		return nil
+	end
+	
+	local children = character:GetChildren()
+	for _, item in ipairs(children) do
+		if item:IsA("Tool") and table.find(ALLOWED_GUNS, item.Name) then
+			return item.Name
+		end
+	end
+	
+	return nil
+end
+
+local getCurrentAmmo = function(tool)
+	local descendants = {tool, unpack(tool:GetDescendants())}
+	
+	for _, obj in ipairs(descendants) do
+		local attributes = obj:GetAttributes()
+		for name, value in pairs(attributes) do
+			if name:lower():find("ammo") and typeof(value) == "number" then
+				return value, obj, name
+			end
+		end
+	end
+	
+	return nil, nil, nil
+end
+
+local getMaxAmmo = function(obj, attrName)
+	local attributes = obj:GetAttributes()
+	local maxValue = attributes["Max" .. attrName]
+	
+	if not maxValue then
+		maxValue = attributes[attrName .. "Max"]
+	end
+	
+	if not maxValue then
+		maxValue = attributes["MaxAmmo"]
+	end
+	
+	return maxValue or 30
+end
+
+local modifyGun = function(tool)
+	if not tool then
+		return
+	end
+	
+	tool:SetAttribute("Firerate", config.firerate)
+	tool:SetAttribute("BulletSpeed", config.bulletSpeed)
+	tool:SetAttribute("Spread", config.spread)
+	tool:SetAttribute("ReloadTime", config.reloadTime)
+	
+	if config.infiniteAmmo then
+		local ammoConnection = tool:GetAttributeChangedSignal("Ammo"):Connect(function()
+			tool:SetAttribute("Ammo", 999)
+		end)
+		
+		tool:SetAttribute("Ammo", 999)
+	end
+end
+
+local fastReload = function(tool)
+	if not tool or tick() - reloadCooldown < 0.1 then
+		return
+	end
+	
+	reloadCooldown = tick()
+	local descendants = {tool, unpack(tool:GetDescendants())}
+	
+	for _, obj in ipairs(descendants) do
+		local attributes = obj:GetAttributes()
+		for name, value in pairs(attributes) do
+			if name:lower():find("ammo") and typeof(value) == "number" then
+				local maxAmmo = getMaxAmmo(obj, name)
+				obj:SetAttribute(name, maxAmmo)
+			end
+		end
+	end
+	
+	local character = LocalPlayer.Character
+	if character then
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			local tracks = humanoid:GetPlayingAnimationTracks()
+			for _, track in ipairs(tracks) do
+				if track.Name:lower():find("reload") then
+					track:Stop()
+					track.TimePosition = track.Length
+				end
+			end
+		end
+	end
+end
+
+-- Weapon detection
+RunService.Heartbeat:Connect(function()
+	local newWeapon = getWpn()
+	
+	if newWeapon and newWeapon ~= lastWeapon then
+		lastWeapon = newWeapon
+		local character = LocalPlayer.Character
+		if character then
+			local tool = character:FindFirstChild(newWeapon)
+			if tool then
+				modifyGun(tool)
+				print("Gun modified: " .. newWeapon)
+			end
+		end
+	end
+end)
+
+-- Manual reload on R key
+local UserInputService = game:GetService("UserInputService")
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed or input.KeyCode ~= Enum.KeyCode.R then
+		return
+	end
+	
+	local character = LocalPlayer.Character
+	if character then
+		local tool = character:FindFirstChildOfClass("Tool")
+		if tool and table.find(ALLOWED_GUNS, tool.Name) then
+			fastReload(tool)
+			print("Fast reload triggered")
+		end
+	end
+end)
+
+print("Gun Modifier script loaded")
