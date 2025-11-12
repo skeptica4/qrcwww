@@ -52,25 +52,21 @@ pcall(function()
 	
 	-- Main burst processing function
 	function processBurstTarget(remoteObj, baseArgs, humanoid)
-		if not humanoid or humanoid.Parent == nil then
+		if not humanoid or not humanoid.Parent then
 			return
 		end
 		
 		local targetParent = humanoid.Parent
-		if not targetParent:IsA("Model") then
-			return
-		end
-		
-		local npcName = targetParent.Name or "Unknown"
 		local startingHealth = humanoid.Health
 		local currentHealth = startingHealth
 		local hitCount = 1
 		
-		print("Starting burst multiplier on " .. tostring(npcName) .. " (Health: " .. startingHealth .. ")")
+		pcall(function()
+			print("Starting burst multiplier on " .. targetParent.Name .. " (Health: " .. startingHealth .. ")")
+		end)
 		
 		while currentHealth > 0 and hitCount <= MAX_HITS do
-			-- Validate target still exists
-			if not humanoid or humanoid.Parent == nil or humanoid.Health <= 0 then
+			if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then
 				break
 			end
 			
@@ -107,9 +103,10 @@ pcall(function()
 			task.wait(HIT_COOLDOWN)
 		end
 		
-		print(npcName .. " defeated after " .. hitCount .. " burst hits!")
+		pcall(function()
+			print(targetParent.Name .. " defeated after " .. hitCount .. " burst hits!")
+		end)
 		
-		-- Clear and process next target if queued
 		activeTarget = nil
 		isProcessing = false
 	end
