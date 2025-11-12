@@ -1,0 +1,20 @@
+-- Standalone script to fire AmmoFabricator proximity prompt
+local workspace = workspace
+local Gameplay = workspace.Map.Gameplay
+local gameplayChildren = Gameplay:GetChildren()
+local targetModel = gameplayChildren[3]
+local ammoFabricator = targetModel.AmmoFabricator
+local base = ammoFabricator.Base
+local main = base.Main
+local proximityPrompt = main.ProximityPrompt
+
+local isValidPrompt = proximityPrompt and proximityPrompt:IsA("ProximityPrompt")
+
+if isValidPrompt then
+	proximityPrompt:InputHoldBegin()
+	wait(0.1)
+	proximityPrompt:InputHoldEnd()
+	print("Proximity prompt fired successfully!")
+else
+	print("Error: Could not find or access the ProximityPrompt")
+end
