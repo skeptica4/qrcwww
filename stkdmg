@@ -1,107 +1,115 @@
 -- Configuration
-local multiplier = true
-local BURST_DAMAGE = 10
-local MAX_HITS = 100
-local HIT_COOLDOWN = 0.05
+local multiplier = true      -- Toggle damage multiplier on/off
 
 -- Set up global access
 _G.multiplier = multiplier
 
--- Target queue system
-local targetQueue = {}
-local activeTarget = nil
-local isProcessing = false
-
+-- Implementation
 pcall(function()
-	-- Get game metatable
-	local mt = getrawmetatable(game)
-	setreadonly(mt, false)
-	
-	local originalNamecall = mt.__namecall
-	
-	-- Override namecall method
-	mt.__namecall = newcclosure(function(self, ...)
-		local method = getnamecallmethod()
-		local args = {...}
-		
-		if _G.multiplier and 
-		   method == "FireServer" and 
-		   self.Name == "VerifyHit" then
-			
-			local target = args[1]
-			if not target or not target:IsA("Humanoid") then
-				return originalNamecall(self, ...)
-			end
-			
-			-- Add to queue if not already processing
-			if not activeTarget then
-				activeTarget = target
-				isProcessing = true
-				
-				-- Start burst processing
-				task.spawn(function()
-					processBurstTarget(self, args, target)
-				end)
-			end
-		end
-		
-		return originalNamecall(self, ...)
-	end)
-	
-	setreadonly(mt, true)
-	
-	-- Main burst processing function
-	function processBurstTarget(remoteObj, baseArgs, humanoid)
-		if not humanoid or not humanoid.Parent then
-			return
-		end
-		
-		local targetParent = humanoid.Parent
-		local startingHealth = humanoid.Health
-		local currentHealth = startingHealth
-		local hitCount = 0
-		
-		pcall(function()
-			print("Starting burst multiplier on " .. targetParent.Name .. " (Health: " .. startingHealth .. ")")
-		end)
-		
-		while currentHealth > 0 and hitCount < MAX_HITS do
-			if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then
-				break
-			end
-			
-			hitCount = hitCount + 1
-			
-			pcall(function()
-				local originalPos = baseArgs[3]
-				
-				if typeof(originalPos) == "Vector3" then
-					local varRange = 0.01
-					local halfVar = varRange / 2
-					
-					local newPos = Vector3.new(
-						originalPos.X + (math.random() * varRange - halfVar),
-						originalPos.Y + (math.random() * varRange - halfVar),
-						originalPos.Z + (math.random() * varRange - halfVar)
-					)
-					
-					remoteObj:FireServer(baseArgs[1], baseArgs[2], newPos)
-				else
-					remoteObj:FireServer(unpack(baseArgs))
-				end
-			end)
-			
-			currentHealth = currentHealth - BURST_DAMAGE
-			task.wait(HIT_COOLDOWN)
-		end
-		
-		pcall(function()
-			print(targetParent.Name .. " defeated after " .. hitCount .. " burst hits!")
-		end)
-		
-		activeTarget = nil
-		isProcessing = false
-	end
-	
-	print("Burst-until-dead damage multiplier " .. (multiplier and "enabled" or "disabled"))
+    -- Get game metatable
+    local mt = getrawmetatable(game)
+    setreadonly(mt, false)
+    
+    -- Store original namecall method
+    local originalNamecall = mt.__namecall
+    
+    -- Track last hit time to avoid spam
+    local lastHitTime = {}
+    
+    -- Override namecall method
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        -- Check if this is a hit verification
+        if _G.multiplier and 
+           method == "FireServer" and 
+           tostring(self) == "VerifyHit" and
+           self:IsDescendantOf(game:GetService("Players").LocalPlayer.Character) then
+            
+            -- Get target info
+            local target = args[1]
+            if not target or not target:IsA("Humanoid") then
+                return originalNamecall(self, ...)
+            end
+            
+            -- Create unique key for this target
+            local targetKey = tostring(target) .. tostring(target.Parent)
+            
+            -- Check if we've hit this target recently
+            local currentTime = tick()
+            if not lastHitTime[targetKey] or (currentTime - lastHitTime[targetKey]) > 1 then
+                -- Record hit time
+                lastHitTime[targetKey] = currentTime
+                
+                local npcName = target.Parent.Name
+                local startingHealth = target.Health
+                print("Starting burst multiplier on " .. npcName .. " (Health: " .. startingHealth .. ")")
+                
+                -- BURST: Keep hitting until target should be <= 0 health
+                local hitCount = 1 -- First hit already happened
+                local currentHealth = startingHealth
+                
+                while currentHealth > 0 do
+                    hitCount = hitCount + 1
+                    
+                    pcall(function()
+                        -- Create new position with slight variation to avoid detection
+                        local originalPos = args[3]
+                        if typeof(originalPos) == "Vector3" then
+                            -- Add tiny random offset to position
+                            local variationRange = 0.01
+                            local newPos = Vector3.new(
+                                originalPos.X + (math.random() * variationRange - variationRange/2),
+                                originalPos.Y + (math.random() * variationRange - variationRange/2),
+                                originalPos.Z + (math.random() * variationRange - variationRange/2)
+                            )
+                            
+                            -- Clone args table with new position
+                            local newArgs = {args[1], args[2], newPos}
+                            for j = 4, #args do
+                                newArgs[j] = args[j]
+                            end
+                            
+                            -- Fire the server with modified position
+                            self.FireServer(self, unpack(newArgs))
+                        else
+                            -- If not a Vector3, just use original args
+                            self.FireServer(self, unpack(args))
+                        end
+                    end)
+                    
+                    -- Assume some damage was dealt to avoid infinite loop
+                    currentHealth = currentHealth - 10 -- Estimated damage per hit
+                    
+                    -- Safety check to prevent infinite loops
+                    if hitCount > 100 then
+                        break
+                    end
+                end
+                
+                print(npcName .. " should be dead after " .. hitCount .. " burst hits!")
+            end
+        end
+        
+        -- Call original method
+        return originalNamecall(self, ...)
+    end)
+    
+    -- Restore metatable protection
+    setreadonly(mt, true)
+    
+    -- Cleanup timer for lastHitTime
+    task.spawn(function()
+        while wait(10) do
+            for key, time in pairs(lastHitTime) do
+                if tick() - time > 10 then
+                    lastHitTime[key] = nil
+                end
+            end
+        end
+    end)
+    
+    print("Burst-until-dead damage multiplier " .. (multiplier and "enabled" or "disabled"))
+    print("Will burst hits until target <= 0 health!")
 end)
