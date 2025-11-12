@@ -1,64 +1,115 @@
--- CONFIG ------------------------------------------------------------------
-local multiplier = true              -- on/off switch
+-- Configuration
+local multiplier = true      -- Toggle damage multiplier on/off
+
+-- Set up global access
 _G.multiplier = multiplier
----------------------------------------------------------------------------
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-
-local lastHit = {}                   -- throttle table: [target] = tick()
-
-local function burstVerifyHit(remote, target, pos, inst)
-    -- safety: only attack humanoids that are still alive
-    if not target or not target:IsA("Humanoid") or target.Health <= 0 then return end
-
-    local key = tostring(target.Parent)
-    local now = tick()
-
-    -- 1-second global throttle per NPC (prevents spam when you hold M1)
-    if lastHit[key] and now - lastHit[key] < 1 then return end
-    lastHit[key] = now
-
-    -- slightly jittered position to look legit
-    local jitter = Vector3.new(
-        math.random(-10, 10) / 1000,
-        math.random(-10, 10) / 1000,
-        math.random(-10, 10) / 1000
-    )
-
-    local args = { target, inst, pos + jitter }
-
-    -- fire the first hit immediately
-    remote:FireServer(unpack(args))
-
-    -- keep firing every 0.03 s until target dies or 2 s elapsed
-    local start = now
-    local conn
-    conn = RunService.Heartbeat:Connect(function()
-        if not _G.multiplier or target.Health <= 0 or tick() - start > 2 then
-            conn:Disconnect()
-            return
-        end
-        remote:FireServer(unpack(args))
-    end)
-end
-
--- hook --------------------------------------------------------------------
-local mt = getrawmetatable(game)
-local old = mt.__namecall
-setreadonly(mt, false)
-
-mt.__namecall = newcclosure(function(self, ...)
-    local method = getnamecallmethod()
-    if _G.multiplier and method == "FireServer" and self.Name == "VerifyHit" and
-       self:IsDescendantOf(Players.LocalPlayer.Character) then
-
+-- Implementation
+pcall(function()
+    -- Get game metatable
+    local mt = getrawmetatable(game)
+    setreadonly(mt, false)
+    
+    -- Store original namecall method
+    local originalNamecall = mt.__namecall
+    
+    -- Track last hit time to avoid spam
+    local lastHitTime = {}
+    
+    -- Override namecall method
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
         local args = {...}
-        burstVerifyHit(self, args[1], args[3], args[2])
-    end
-    return old(self, ...)
+        
+        -- Check if this is a hit verification
+        if _G.multiplier and 
+           method == "FireServer" and 
+           tostring(self) == "VerifyHit" and
+           self:IsDescendantOf(game:GetService("Players").LocalPlayer.Character) then
+            
+            -- Get target info
+            local target = args[1]
+            if not target or not target:IsA("Humanoid") then
+                return originalNamecall(self, ...)
+            end
+            
+            -- Create unique key for this target
+            local targetKey = tostring(target) .. tostring(target.Parent)
+            
+            -- Check if we've hit this target recently
+            local currentTime = tick()
+            if not lastHitTime[targetKey] or (currentTime - lastHitTime[targetKey]) > 1 then
+                -- Record hit time
+                lastHitTime[targetKey] = currentTime
+                
+                local npcName = target.Parent.Name
+                local startingHealth = target.Health
+                print("Starting burst multiplier on " .. npcName .. " (Health: " .. startingHealth .. ")")
+                
+                -- BURST: Keep hitting until target should be <= 0 health
+                local hitCount = 1 -- First hit already happened
+                local currentHealth = startingHealth
+                
+                while currentHealth > 0 do
+                    hitCount = hitCount + 1
+                    
+                    pcall(function()
+                        -- Create new position with slight variation to avoid detection
+                        local originalPos = args[3]
+                        if typeof(originalPos) == "Vector3" then
+                            -- Add tiny random offset to position
+                            local variationRange = 0.01
+                            local newPos = Vector3.new(
+                                originalPos.X + (math.random() * variationRange - variationRange/2),
+                                originalPos.Y + (math.random() * variationRange - variationRange/2),
+                                originalPos.Z + (math.random() * variationRange - variationRange/2)
+                            )
+                            
+                            -- Clone args table with new position
+                            local newArgs = {args[1], args[2], newPos}
+                            for j = 4, #args do
+                                newArgs[j] = args[j]
+                            end
+                            
+                            -- Fire the server with modified position
+                            self.FireServer(self, unpack(newArgs))
+                        else
+                            -- If not a Vector3, just use original args
+                            self.FireServer(self, unpack(args))
+                        end
+                    end)
+                    
+                    -- Assume some damage was dealt to avoid infinite loop
+                    currentHealth = currentHealth - 10 -- Estimated damage per hit
+                    
+                    -- Safety check to prevent infinite loops
+                    if hitCount > 100 then
+                        break
+                    end
+                end
+                
+                print(npcName .. " should be dead after " .. hitCount .. " burst hits!")
+            end
+        end
+        
+        -- Call original method
+        return originalNamecall(self, ...)
+    end)
+    
+    -- Restore metatable protection
+    setreadonly(mt, true)
+    
+    -- Cleanup timer for lastHitTime
+    task.spawn(function()
+        while wait(10) do
+            for key, time in pairs(lastHitTime) do
+                if tick() - time > 10 then
+                    lastHitTime[key] = nil
+                end
+            end
+        end
+    end)
+    
+    print("Burst-until-dead damage multiplier " .. (multiplier and "enabled" or "disabled"))
+    print("Will burst hits until target <= 0 health!")
 end)
-
-setreadonly(mt, true)
-
-print("Burst-until-dead multiplier " .. (multiplier and "enabled" or "disabled"))
