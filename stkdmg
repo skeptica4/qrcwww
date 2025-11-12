@@ -1,4 +1,4 @@
--- Configuration 1.5
+-- Configuration 
 local multiplier = true      -- Toggle damage multiplier on/off
 
 -- Set up global access
