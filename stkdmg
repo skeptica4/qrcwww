@@ -76,15 +76,24 @@ local hookMetamethod = function()
 	setreadonly(metatable, false)
 	
 	metatable.__namecall = newcclosure(function(self, ...)
-		local args = {...}
+		if not pcall(function() getnamecallmethod() end) then
+			return originalNamecall(self, ...)
+		end
+		
 		local method = getnamecallmethod()
 		
-		if config.enabled and method == "FireServer" and self.Name == "VerifyHit" then
-			local character = LocalPlayer.Character
-			if character and self:IsDescendantOf(character) then
-				-- Verify args exist and are valid
-				if args[1] and args[3] and typeof(args[1]) == "Instance" then
-					burstVerifyHit(self, args[1], args[3], args[2])
+		if config.enabled and method == "FireServer" then
+			if self.Name == "VerifyHit" then
+				local character = LocalPlayer.Character
+				if character and self:IsDescendantOf(character) then
+					local args = {...}
+					
+					-- Verify args exist and are valid
+					if #args >= 3 and args[1] and args[3] then
+						if typeof(args[1]) == "Instance" and args[1]:IsA("Humanoid") then
+							burstVerifyHit(self, args[1], args[3], args[2])
+						end
+					end
 				end
 			end
 		end
