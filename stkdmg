@@ -1,153 +1,105 @@
 -- Configuration
-local multiplier = true      -- Toggle damage multiplier on/off
-local DAMAGE_PER_HIT = 10    -- Estimated damage per hit
-local MAX_HITS_PER_TARGET = 100
-local HIT_COOLDOWN = 1
+local multiplier = true
+local BURST_DAMAGE = 10
+local MAX_HITS = 100
+local HIT_COOLDOWN = 0.05
 
 -- Set up global access
 _G.multiplier = multiplier
 
--- Implementation
+-- Target queue system
+local targetQueue = {}
+local activeTarget = nil
+local isProcessing = false
+
 pcall(function()
 	-- Get game metatable
 	local mt = getrawmetatable(game)
 	setreadonly(mt, false)
 	
-	-- Store original namecall method
 	local originalNamecall = mt.__namecall
-	
-	-- Active target tracking
-	local activeTarget = nil
-	local targetQueue = {}
-	local lastHitTime = {}
-	local originalArgs = {}
-	
-	-- Process active target with burst hits
-	local function burstTarget(target, args)
-		if not target or not target:IsA("Humanoid") then
-			return
-		end
-		
-		local npcName = target.Parent.Name
-		local startingHealth = target.Health
-		print("Starting burst multiplier on " .. npcName .. " (Health: " .. startingHealth .. ")")
-		
-		local hitCount = 1
-		local currentHealth = startingHealth
-		
-		while currentHealth > 0 and hitCount < MAX_HITS_PER_TARGET do
-			hitCount = hitCount + 1
-			
-			pcall(function()
-				local originalPos = args[3]
-				
-				if typeof(originalPos) == "Vector3" then
-					-- Add tiny random offset to position
-					local variationRange = 0.01
-					local newPos = Vector3.new(
-						originalPos.X + (math.random() * variationRange - variationRange/2),
-						originalPos.Y + (math.random() * variationRange - variationRange/2),
-						originalPos.Z + (math.random() * variationRange - variationRange/2)
-					)
-					
-					-- Clone args table with new position
-					local newArgs = {args[1], args[2], newPos}
-					for j = 4, #args do
-						newArgs[j] = args[j]
-					end
-					
-					originalNamecall(args[4], unpack(newArgs))
-				else
-					originalNamecall(args[4], unpack(args))
-				end
-			end)
-			
-			currentHealth = currentHealth - DAMAGE_PER_HIT
-			task.wait(0.05) -- Small delay between hits
-		end
-		
-		print(npcName .. " should be dead after " .. hitCount .. " burst hits!")
-	end
-	
-	-- Main target processing loop
-	task.spawn(function()
-		while true do
-			task.wait(0.1)
-			
-			if activeTarget then
-				local humanoid = activeTarget
-				
-				-- Check if target is still alive
-				if humanoid.Health <= 0 or not humanoid.Parent then
-					activeTarget = nil
-					lastHitTime[tostring(humanoid)] = nil
-				end
-			end
-			
-			-- Process queue if no active target
-			if not activeTarget and #targetQueue > 0 then
-				activeTarget = table.remove(targetQueue, 1)
-			end
-		end
-	end)
 	
 	-- Override namecall method
 	mt.__namecall = newcclosure(function(self, ...)
 		local method = getnamecallmethod()
 		local args = {...}
 		
-		-- Check if this is a hit verification
 		if _G.multiplier and 
 		   method == "FireServer" and 
-		   tostring(self) == "VerifyHit" and
-		   self:IsDescendantOf(game:GetService("Players").LocalPlayer.Character) then
+		   tostring(self) == "VerifyHit" then
 			
-			-- Get target info
 			local target = args[1]
 			if not target or not target:IsA("Humanoid") then
 				return originalNamecall(self, ...)
 			end
 			
-			local targetKey = tostring(target) .. tostring(target.Parent)
-			local currentTime = tick()
-			
-			-- Check if we've hit this target recently
-			if not lastHitTime[targetKey] or (currentTime - lastHitTime[targetKey]) > HIT_COOLDOWN then
-				lastHitTime[targetKey] = currentTime
+			-- Add to queue if not already processing
+			if not activeTarget then
+				activeTarget = target
+				isProcessing = true
 				
-				-- Set as active target if none exists
-				if not activeTarget then
-					activeTarget = target
-					originalArgs = args
-					task.spawn(function()
-						burstTarget(activeTarget, originalArgs)
-					end)
-				else
-					-- Queue for later processing
-					table.insert(targetQueue, target)
-				end
+				-- Start burst processing
+				task.spawn(function()
+					processBurstTarget(self, args, target)
+				end)
 			end
 		end
 		
-		-- Call original method
 		return originalNamecall(self, ...)
 	end)
 	
-	-- Restore metatable protection
 	setreadonly(mt, true)
 	
-	-- Cleanup timer for lastHitTime
-	task.spawn(function()
-		while task.wait(10) do
-			local currentTime = tick()
-			for key, time in pairs(lastHitTime) do
-				if currentTime - time > 10 then
-					lastHitTime[key] = nil
+	-- Main burst processing function
+	function processBurstTarget(remoteObj, baseArgs, humanoid)
+		local targetParent = humanoid.Parent
+		local npcName = targetParent.Name
+		local startingHealth = humanoid.Health
+		local currentHealth = startingHealth
+		local hitCount = 1
+		
+		print("Starting burst multiplier on " .. npcName .. " (Health: " .. startingHealth .. ")")
+		
+		while currentHealth > 0 and hitCount <= MAX_HITS do
+			hitCount = hitCount + 1
+			
+			pcall(function()
+				local originalPos = baseArgs[3]
+				
+				if typeof(originalPos) == "Vector3" then
+					local varRange = 0.01
+					local halfVar = varRange / 2
+					local randomX = math.random() * varRange - halfVar
+					local randomY = math.random() * varRange - halfVar
+					local randomZ = math.random() * varRange - halfVar
+					
+					local newPos = Vector3.new(
+						originalPos.X + randomX,
+						originalPos.Y + randomY,
+						originalPos.Z + randomZ
+					)
+					
+					local newArgs = {baseArgs[1], baseArgs[2], newPos}
+					for j = 4, #baseArgs do
+						newArgs[j] = baseArgs[j]
+					end
+					
+					remoteObj:FireServer(unpack(newArgs))
+				else
+					remoteObj:FireServer(unpack(baseArgs))
 				end
-			end
+			end)
+			
+			currentHealth = currentHealth - BURST_DAMAGE
+			task.wait(HIT_COOLDOWN)
 		end
-	end)
+		
+		print(npcName .. " defeated after " .. hitCount .. " burst hits!")
+		
+		-- Clear and process next target if queued
+		activeTarget = nil
+		isProcessing = false
+	end
 	
 	print("Burst-until-dead damage multiplier " .. (multiplier and "enabled" or "disabled"))
-	print("Will burst hits until target <= 0 health!")
 end)
