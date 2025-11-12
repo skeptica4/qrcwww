@@ -1,180 +1,64 @@
--- Stack Damage Script - Burst Attack Multiplier Module
+-- CONFIG ------------------------------------------------------------------
+local multiplier = true              -- on/off switch
+_G.multiplier = multiplier
+---------------------------------------------------------------------------
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 
-local LocalPlayer = Players.LocalPlayer
+local lastHit = {}                   -- throttle table: [target] = tick()
 
--- Mobile detection
-local isMobile = (not UserInputService.KeyboardEnabled)
+local function burstVerifyHit(remote, target, pos, inst)
+    -- safety: only attack humanoids that are still alive
+    if not target or not target:IsA("Humanoid") or target.Health <= 0 then return end
 
--- Configuration
-local config = {
-	enabled = true,
-	burstDuration = 2,
-	burstInterval = 0.03,
-	throttlePerTarget = 1,
-	jitterAmount = 10
-}
+    local key = tostring(target.Parent)
+    local now = tick()
 
-local lastHit = {}
+    -- 1-second global throttle per NPC (prevents spam when you hold M1)
+    if lastHit[key] and now - lastHit[key] < 1 then return end
+    lastHit[key] = now
 
--- Generate jittered position for legitimacy
-local getJitteredPosition = function(basePos)
-	local jitter = Vector3.new(
-		math.random(-config.jitterAmount, config.jitterAmount) / 1000,
-		math.random(-config.jitterAmount, config.jitterAmount) / 1000,
-		math.random(-config.jitterAmount, config.jitterAmount) / 1000
-	)
-	return basePos + jitter
+    -- slightly jittered position to look legit
+    local jitter = Vector3.new(
+        math.random(-10, 10) / 1000,
+        math.random(-10, 10) / 1000,
+        math.random(-10, 10) / 1000
+    )
+
+    local args = { target, inst, pos + jitter }
+
+    -- fire the first hit immediately
+    remote:FireServer(unpack(args))
+
+    -- keep firing every 0.03 s until target dies or 2 s elapsed
+    local start = now
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if not _G.multiplier or target.Health <= 0 or tick() - start > 2 then
+            conn:Disconnect()
+            return
+        end
+        remote:FireServer(unpack(args))
+    end)
 end
 
--- Perform burst verify hit
-local burstVerifyHit = function(remote, target, pos, inst)
-	if not target or not target:IsA("Humanoid") or target.Health <= 0 then
-		return
-	end
-	
-	local key = tostring(target.Parent)
-	local now = tick()
-	
-	-- Throttle per NPC to prevent spam
-	if lastHit[key] and now - lastHit[key] < config.throttlePerTarget then
-		return
-	end
-	
-	lastHit[key] = now
-	
-	local jitteredPos = getJitteredPosition(pos)
-	local args = {target, inst, jitteredPos}
-	
-	-- Fire initial hit
-	remote:FireServer(unpack(args))
-	
-	-- Continue burst fire until target dies or duration elapsed
-	local startTime = now
-	local connection
-	
-	connection = RunService.Heartbeat:Connect(function()
-		if not config.enabled or target.Health <= 0 or tick() - startTime > config.burstDuration then
-			if connection then
-				connection:Disconnect()
-			end
-			return
-		end
-		
-		local burstJitter = getJitteredPosition(pos)
-		remote:FireServer(target, inst, burstJitter)
-	end)
-end
+-- hook --------------------------------------------------------------------
+local mt = getrawmetatable(game)
+local old = mt.__namecall
+setreadonly(mt, false)
 
--- Hook into metamethod
-local hookMetamethod = function()
-	local metatable = getrawmetatable(game)
-	local originalNamecall = metatable.__namecall
-	
-	setreadonly(metatable, false)
-	
-	metatable.__namecall = newcclosure(function(self, ...)
-		if not pcall(function() getnamecallmethod() end) then
-			return originalNamecall(self, ...)
-		end
-		
-		local method = getnamecallmethod()
-		
-		if config.enabled and method == "FireServer" then
-			if self.Name == "VerifyHit" then
-				local character = LocalPlayer.Character
-				if character and self:IsDescendantOf(character) then
-					local args = {...}
-					
-					-- Verify args exist and are valid
-					if #args >= 3 and args[1] and args[3] then
-						if typeof(args[1]) == "Instance" and args[1]:IsA("Humanoid") then
-							burstVerifyHit(self, args[1], args[3], args[2])
-						end
-					end
-				end
-			end
-		end
-		
-		return originalNamecall(self, ...)
-	end)
-	
-	setreadonly(metatable, true)
-end
+mt.__namecall = newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    if _G.multiplier and method == "FireServer" and self.Name == "VerifyHit" and
+       self:IsDescendantOf(Players.LocalPlayer.Character) then
 
--- Toggle functionality
-local toggleStackDamage = function(enabled)
-	config.enabled = enabled
-	print("Stack Damage " .. (config.enabled and "Enabled" or "Disabled"))
-end
+        local args = {...}
+        burstVerifyHit(self, args[1], args[3], args[2])
+    end
+    return old(self, ...)
+end)
 
--- Desktop keyboard control
-if not isMobile then
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed or input.KeyCode ~= Enum.KeyCode.F2 then
-			return
-		end
-		
-		config.enabled = not config.enabled
-		print("Stack Damage " .. (config.enabled and "Enabled" or "Disabled"))
-	end)
-else
-	-- Mobile touch UI
-	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "StackDmgMobile"
-	screenGui.ResetOnSpawn = false
-	screenGui.Parent = playerGui
-	
-	local toggleButton = Instance.new("TextButton")
-	toggleButton.Name = "StackDmgToggle"
-	toggleButton.Size = UDim2.fromOffset(80, 80)
-	toggleButton.Position = UDim2.fromOffset(190, 10)
-	toggleButton.BackgroundColor3 = Color3.fromRGB(76, 175, 80)
-	toggleButton.BackgroundTransparency = 0.6
-	toggleButton.Text = "STACK\nON"
-	toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	toggleButton.Font = Enum.Font.GothamBold
-	toggleButton.TextSize = 12
-	toggleButton.BorderSizePixel = 0
-	toggleButton.Parent = screenGui
-	
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = toggleButton
-	
-	toggleButton.Activated:Connect(function()
-		config.enabled = not config.enabled
-		toggleButton.Text = config.enabled and "STACK\nON" or "STACK\nOFF"
-		toggleButton.BackgroundColor3 = config.enabled and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(200, 50, 50)
-	end)
-	
-	-- Stats display
-	local statsLabel = Instance.new("TextLabel")
-	statsLabel.Name = "StatsDisplay"
-	statsLabel.Size = UDim2.fromOffset(100, 60)
-	statsLabel.Position = UDim2.fromOffset(190, 100)
-	statsLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	statsLabel.BackgroundTransparency = 0.3
-	statsLabel.Text = "Burst: " .. config.burstDuration .. "s\nInt: " .. config.burstInterval .. "s"
-	statsLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	statsLabel.Font = Enum.Font.Gotham
-	statsLabel.TextSize = 11
-	statsLabel.TextWrapped = true
-	statsLabel.Parent = screenGui
-	
-	local statsCorner = Instance.new("UICorner")
-	statsCorner.CornerRadius = UDim.new(0, 10)
-	statsCorner.Parent = statsLabel
-end
+setreadonly(mt, true)
 
--- Initialize metamethod hook
-hookMetamethod()
-
--- Export configuration for external modification
-getgenv().stackDmgConfig = config
-getgenv().stackDmgToggle = toggleStackDamage
-
-print("Stack Damage script loaded - Press F2 to toggle" .. (isMobile and " (Mobile)" or ""))
+print("Burst-until-dead multiplier " .. (multiplier and "enabled" or "disabled"))
