@@ -1,4 +1,4 @@
--- VapeV4 Stack Damage Module
+-- VapeV4 Stack Damage & Gun Modifier Combined Script
 -- Standalone Implementation
 
 -- Load VapeV4 as Independent
@@ -11,7 +11,24 @@ local vape = loadstring(
 )()
 
 -- Set config name
-vape.Place = 'StackDamage'
+vape.Place = 'CombatEnhancer'
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Gun Modifier Constants
+local ALLOWED_GUNS = {
+	"Akimbo", "Voltaic Impact", "Gunslingers", "Burst Rifle", "Stonewall",
+	"Steelforge", "DMR", "Gift of Fire", "Armour Peeler", "Medical Bow",
+	"Recurve", "Vitabow", "Rifle", "Bolter", "Harpoon Gun", "RPG",
+	"Rocket Stormer", "Shockwave Device", "Shotgun", "Hallsweeper",
+	"Sprinter's Streak", "SMG", "Loose Trigger", "Twinface",
+	"Mastermind's Rifle", "Shovel", "Overcharger", "Rallying Cry",
+	"Machete", "Handaxes", "Torqueblade"
+}
 
 -- Stack Damage Module Implementation
 local StackDamage
@@ -80,6 +97,8 @@ StackDamage = vape.Categories.Combat:CreateModule({
 										local activeTarget = currentTarget
 										local activeSelf = self
 										local baseArgs = args
+										local safetyLimit = StackDamage.SafetyLimit or 150
+										local burstDelay = StackDamage.BurstDelay or 0.01
 										
 										while targetLocked and 
 											  activeTarget == currentTarget and 
@@ -149,7 +168,7 @@ StackDamage = vape.Categories.Combat:CreateModule({
 											end)
 											
 											-- Safety check
-											if hitCount > 150 then
+											if hitCount > safetyLimit then
 												print(
 													"Stack Damage: Safety limit reached on " .. 
 													npcName
@@ -164,7 +183,7 @@ StackDamage = vape.Categories.Combat:CreateModule({
 											end
 											
 											-- Small delay to prevent server overload
-											task.wait(0.01)
+											task.wait(burstDelay)
 										end
 									end)
 								end
@@ -209,7 +228,7 @@ StackDamage = vape.Categories.Combat:CreateModule({
 	Tooltip = 'Multiplies damage by locking onto targets and bursting until eliminated'
 })
 
--- Add toggle for enabling/disabling the multiplier
+-- Stack Damage Configuration Components
 local MultiplierEnabled
 MultiplierEnabled = StackDamage:CreateToggle({
 	Name = 'Damage Multiplier',
@@ -225,14 +244,12 @@ MultiplierEnabled = StackDamage:CreateToggle({
 	Tooltip = 'Toggle damage multiplication on/off'
 })
 
--- Add safety limit slider
 local SafetyLimit
 SafetyLimit = StackDamage:CreateSlider({
 	Name = 'Safety Limit',
 	Min = 50,
 	Max = 300,
 	Function = function(val)
-		-- This will be referenced in the burst loop
 		StackDamage.SafetyLimit = val
 	end,
 	Default = 150,
@@ -240,7 +257,6 @@ SafetyLimit = StackDamage:CreateSlider({
 	Tooltip = 'Maximum hits per target before auto-release'
 })
 
--- Add burst delay slider
 local BurstDelay
 BurstDelay = StackDamage:CreateSlider({
 	Name = 'Burst Delay',
@@ -255,15 +271,267 @@ BurstDelay = StackDamage:CreateSlider({
 	Tooltip = 'Delay between each burst hit'
 })
 
--- Initialize default values
+-- Initialize Stack Damage default values
 StackDamage.SafetyLimit = 150
 StackDamage.BurstDelay = 0.01
-
--- Set up global access
 _G.multiplier = true
+
+-- Gun Modifier Module Implementation
+local GunModifier
+GunModifier = vape.Categories.Combat:CreateModule({
+	Name = 'Gun Modifier',
+	Function = function(callback)
+		if callback then
+			print('Gun Modifier enabled - Weapon enhancement active')
+			
+			-- Local variables for gun modification
+			local lastWeapon = nil
+			local reloadCooldown = 0
+			local weaponConnection
+			local reloadConnection
+			
+			-- Helper functions
+			local getWpn = function()
+				local character = LocalPlayer.Character
+				if not character then
+					return nil
+				end
+				
+				local children = character:GetChildren()
+				for _, item in ipairs(children) do
+					if item:IsA("Tool") and table.find(ALLOWED_GUNS, item.Name) then
+						return item.Name
+					end
+				end
+				
+				return nil
+			end
+			
+			local getCurrentAmmo = function(tool)
+				local descendants = {tool, unpack(tool:GetDescendants())}
+				
+				for _, obj in ipairs(descendants) do
+					local attributes = obj:GetAttributes()
+					for name, value in pairs(attributes) do
+						if name:lower():find("ammo") and typeof(value) == "number" then
+							return value, obj, name
+						end
+					end
+				end
+				
+				return nil, nil, nil
+			end
+			
+			local getMaxAmmo = function(obj, attrName)
+				local attributes = obj:GetAttributes()
+				local maxValue = attributes["Max" .. attrName]
+				
+				if not maxValue then
+					maxValue = attributes[attrName .. "Max"]
+				end
+				
+				if not maxValue then
+					maxValue = attributes["MaxAmmo"]
+				end
+				
+				return maxValue or 30
+			end
+			
+			local modifyGun = function(tool)
+				if not tool or not GunModifier.Enabled then
+					return
+				end
+				
+				local firerateValue = GunModifier.Firerate or 500
+				local bulletSpeedValue = GunModifier.BulletSpeed or 9999
+				local spreadValue = GunModifier.Spread or 0
+				local reloadTimeValue = GunModifier.ReloadTime or 0.1
+				local infiniteAmmoEnabled = GunModifier.InfiniteAmmo or true
+				
+				tool:SetAttribute("Firerate", firerateValue)
+				tool:SetAttribute("BulletSpeed", bulletSpeedValue)
+				tool:SetAttribute("Spread", spreadValue)
+				tool:SetAttribute("ReloadTime", reloadTimeValue)
+				
+				if infiniteAmmoEnabled then
+					local ammoConnection = tool:GetAttributeChangedSignal("Ammo"):Connect(function()
+						if GunModifier.Enabled then
+							tool:SetAttribute("Ammo", 999)
+						end
+					end)
+					
+					GunModifier:Clean(ammoConnection)
+					tool:SetAttribute("Ammo", 999)
+				end
+			end
+			
+			local fastReload = function(tool)
+				if not tool or not GunModifier.Enabled or tick() - reloadCooldown < 0.1 then
+					return
+				end
+				
+				reloadCooldown = tick()
+				local descendants = {tool, unpack(tool:GetDescendants())}
+				
+				for _, obj in ipairs(descendants) do
+					local attributes = obj:GetAttributes()
+					for name, value in pairs(attributes) do
+						if name:lower():find("ammo") and typeof(value) == "number" then
+							local maxAmmo = getMaxAmmo(obj, name)
+							obj:SetAttribute(name, maxAmmo)
+						end
+					end
+				end
+				
+				local character = LocalPlayer.Character
+				if character then
+					local humanoid = character:FindFirstChildOfClass("Humanoid")
+					if humanoid then
+						local tracks = humanoid:GetPlayingAnimationTracks()
+						for _, track in ipairs(tracks) do
+							if track.Name:lower():find("reload") then
+								track:Stop()
+								track.TimePosition = track.Length
+							end
+						end
+					end
+				end
+				
+				print("Gun Modifier: Fast reload triggered")
+			end
+			
+			-- Weapon detection loop
+			weaponConnection = RunService.Heartbeat:Connect(function()
+				if not GunModifier.Enabled then
+					return
+				end
+				
+				local newWeapon = getWpn()
+				
+				if newWeapon and newWeapon ~= lastWeapon then
+					lastWeapon = newWeapon
+					local character = LocalPlayer.Character
+					if character then
+						local tool = character:FindFirstChild(newWeapon)
+						if tool then
+							modifyGun(tool)
+							print("Gun Modifier: Gun modified - " .. newWeapon)
+						end
+					end
+				end
+			end)
+			
+			-- Manual reload on R key
+			reloadConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+				if gameProcessed or 
+				   input.KeyCode ~= Enum.KeyCode.R or 
+				   not GunModifier.Enabled then
+					return
+				end
+				
+				local character = LocalPlayer.Character
+				if character then
+					local tool = character:FindFirstChildOfClass("Tool")
+					if tool and table.find(ALLOWED_GUNS, tool.Name) then
+						fastReload(tool)
+					end
+				end
+			end)
+			
+			-- Clean up connections when module is disabled
+			GunModifier:Clean(weaponConnection)
+			GunModifier:Clean(reloadConnection)
+			
+		else
+			print('Gun Modifier disabled')
+		end
+	end,
+	ExtraText = function()
+		return 'Enhanced'
+	end,
+	Tooltip = 'Modifies weapon stats and enables fast reload'
+})
+
+-- Gun Modifier Configuration Components
+local FirerateSlider
+FirerateSlider = GunModifier:CreateSlider({
+	Name = 'Fire Rate',
+	Min = 100,
+	Max = 1000,
+	Function = function(val)
+		GunModifier.Firerate = val
+	end,
+	Default = 500,
+	Suffix = ' RPM',
+	Tooltip = 'Weapon fire rate in rounds per minute'
+})
+
+local BulletSpeedSlider
+BulletSpeedSlider = GunModifier:CreateSlider({
+	Name = 'Bullet Speed',
+	Min = 1000,
+	Max = 15000,
+	Function = function(val)
+		GunModifier.BulletSpeed = val
+	end,
+	Default = 9999,
+	Suffix = ' u/s',
+	Tooltip = 'Bullet velocity in units per second'
+})
+
+local SpreadSlider
+SpreadSlider = GunModifier:CreateSlider({
+	Name = 'Spread',
+	Min = 0,
+	Max = 10,
+	Function = function(val)
+		GunModifier.Spread = val
+	end,
+	Default = 0,
+	Decimal = 10,
+	Suffix = '°',
+	Tooltip = 'Weapon spread in degrees'
+})
+
+local ReloadTimeSlider
+ReloadTimeSlider = GunModifier:CreateSlider({
+	Name = 'Reload Time',
+	Min = 0.1,
+	Max = 3.0,
+	Function = function(val)
+		GunModifier.ReloadTime = val
+	end,
+	Default = 0.1,
+	Decimal = 10,
+	Suffix = 's',
+	Tooltip = 'Weapon reload time in seconds'
+})
+
+local InfiniteAmmoToggle
+InfiniteAmmoToggle = GunModifier:CreateToggle({
+	Name = 'Infinite Ammo',
+	Function = function(callback)
+		GunModifier.InfiniteAmmo = callback
+		if callback then
+			print('Gun Modifier: Infinite ammo enabled')
+		else
+			print('Gun Modifier: Infinite ammo disabled')
+		end
+	end,
+	Default = true,
+	Tooltip = 'Enable infinite ammunition'
+})
+
+-- Initialize Gun Modifier default values
+GunModifier.Firerate = 500
+GunModifier.BulletSpeed = 9999
+GunModifier.Spread = 0
+GunModifier.ReloadTime = 0.1
+GunModifier.InfiniteAmmo = true
 
 -- Initialize VapeV4
 vape:Init()
 
-print('VapeV4 Stack Damage module loaded successfully!')
+print('VapeV4 Combat Enhancer loaded successfully!')
+print('Features: Stack Damage + Gun Modifier')
 print('Press the GUI toggle key to access the Combat category')
