@@ -2,9 +2,7 @@
 -- Stack Damage + Gun Modifier with Libraries Integration
 
 shared.VapeIndependent = true
-local vape = loadstring(
-	game:HttpGet(
-		'https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/main/NewMainScript.lua', true))()
+local vape = loadstring(game:HttpGet('https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/main/NewMainScript.lua', true))()
 
 vape.Place = 'CombatEnhancer'
 
