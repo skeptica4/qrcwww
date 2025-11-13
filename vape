@@ -1,13 +1,269 @@
-shared.VapeIndependent = true
-local vape = loadstring(game:HttpGet('https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/main/NewMainScript.lua', true))()
-vape.Place = 'Universal'
+-- VapeV4 Stack Damage Module
+-- Standalone Implementation
 
-local test = vape.Categories.Combat:CreateModule({
-    Name = 'Test',
-    Function = function(callback)
-        print(callback, 'module enabled!')
-    end,
-    Tooltip = 'This is a test module'
+-- Load VapeV4 as Independent
+shared.VapeIndependent = true
+local vape = loadstring(
+	game:HttpGet(
+		'https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/main/NewMainScript.lua', 
+		true
+	)
+)()
+
+-- Set config name
+vape.Place = 'StackDamage'
+
+-- Stack Damage Module Implementation
+local StackDamage
+StackDamage = vape.Categories.Combat:CreateModule({
+	Name = 'Stack Damage',
+	Function = function(callback)
+		if callback then
+			-- Module enabled
+			print('Stack Damage enabled - Target locking system active')
+			
+			-- Store original state
+			local originalNamecall
+			local gameMetatable
+			local targetLocked = false
+			local burstActive = false
+			local currentTarget = nil
+			
+			-- Implementation
+			pcall(function()
+				-- Get game metatable
+				gameMetatable = getrawmetatable(game)
+				setreadonly(gameMetatable, false)
+				
+				-- Store original namecall method
+				originalNamecall = gameMetatable.__namecall
+				
+				-- Override namecall method
+				gameMetatable.__namecall = newcclosure(function(self, ...)
+					local method = getnamecallmethod()
+					local args = {...}
+					
+					-- Check if this is a hit verification and module is enabled
+					if StackDamage.Enabled and 
+					   method == "FireServer" and 
+					   tostring(self) == "VerifyHit" then
+						
+						local localPlayer = game:GetService("Players").LocalPlayer
+						local character = localPlayer.Character
+						
+						if character and self:IsDescendantOf(character) then
+							-- Get target info
+							local target = args[1]
+							
+							if target and target:IsA("Humanoid") then
+								-- New target detected or target changed
+								if not burstActive or currentTarget ~= target then
+									currentTarget = target
+									targetLocked = true
+									burstActive = true
+									
+									local npcParent = target.Parent
+									local npcName = npcParent.Name
+									local startingHealth = target.Health
+									
+									print(
+										"Stack Damage: Locking onto " .. 
+										npcName .. 
+										" (Health: " .. 
+										startingHealth .. 
+										")"
+									)
+									
+									-- Spawn persistent burst loop
+									task.spawn(function()
+										local hitCount = 1
+										local activeTarget = currentTarget
+										local activeSelf = self
+										local baseArgs = args
+										
+										while targetLocked and 
+											  activeTarget == currentTarget and 
+											  StackDamage.Enabled do
+											
+											-- Check if target is still valid and alive
+											local targetHealth = activeTarget.Health
+											local targetParent = activeTarget.Parent
+											
+											if not targetParent or targetHealth <= 0 then
+												print(
+													"Stack Damage: " .. 
+													npcName .. 
+													" eliminated after " .. 
+													hitCount .. 
+													" hits!"
+												)
+												
+												-- Release lock to allow new target
+												if activeTarget == currentTarget then
+													currentTarget = nil
+													targetLocked = false
+													burstActive = false
+												end
+												break
+											end
+											
+											-- Continue burst on current target
+											hitCount = hitCount + 1
+											
+											pcall(function()
+												-- Create position variation
+												local originalPos = baseArgs[3]
+												
+												if typeof(originalPos) == "Vector3" then
+													-- Add tiny random offset
+													local variance = 0.01
+													local halfVar = variance / 2
+													local randomX = math.random() * variance - halfVar
+													local randomY = math.random() * variance - halfVar
+													local randomZ = math.random() * variance - halfVar
+													
+													local newPos = Vector3.new(
+														originalPos.X + randomX,
+														originalPos.Y + randomY,
+														originalPos.Z + randomZ
+													)
+													
+													-- Build modified args
+													local newArgs = {
+														baseArgs[1],
+														baseArgs[2],
+														newPos
+													}
+													
+													local argCount = #baseArgs
+													for j = 4, argCount do
+														newArgs[j] = baseArgs[j]
+													end
+													
+													-- Fire server
+													activeSelf.FireServer(activeSelf, unpack(newArgs))
+												else
+													-- Use original args
+													activeSelf.FireServer(activeSelf, unpack(baseArgs))
+												end
+											end)
+											
+											-- Safety check
+											if hitCount > 150 then
+												print(
+													"Stack Damage: Safety limit reached on " .. 
+													npcName
+												)
+												
+												if activeTarget == currentTarget then
+													currentTarget = nil
+													targetLocked = false
+													burstActive = false
+												end
+												break
+											end
+											
+											-- Small delay to prevent server overload
+											task.wait(0.01)
+										end
+									end)
+								end
+							end
+						end
+					end
+					
+					-- Call original method
+					return originalNamecall(self, ...)
+				end)
+				
+				-- Restore metatable protection
+				setreadonly(gameMetatable, true)
+			end)
+			
+			-- Clean up when module is disabled
+			StackDamage:Clean(function()
+				-- Reset target tracking
+				currentTarget = nil
+				targetLocked = false
+				burstActive = false
+				
+				-- Restore original namecall if it exists
+				if originalNamecall and gameMetatable then
+					pcall(function()
+						setreadonly(gameMetatable, false)
+						gameMetatable.__namecall = originalNamecall
+						setreadonly(gameMetatable, true)
+					end)
+				end
+				
+				print('Stack Damage disabled - Original hooks restored')
+			end)
+			
+		else
+			-- Module disabled (cleanup handled by Clean function above)
+		end
+	end,
+	ExtraText = function()
+		return 'Burst'
+	end,
+	Tooltip = 'Multiplies damage by locking onto targets and bursting until eliminated'
 })
 
+-- Add toggle for enabling/disabling the multiplier
+local MultiplierEnabled
+MultiplierEnabled = StackDamage:CreateToggle({
+	Name = 'Damage Multiplier',
+	Function = function(callback)
+		_G.multiplier = callback
+		if callback then
+			print('Stack Damage: Multiplier enabled')
+		else
+			print('Stack Damage: Multiplier disabled')
+		end
+	end,
+	Default = true,
+	Tooltip = 'Toggle damage multiplication on/off'
+})
+
+-- Add safety limit slider
+local SafetyLimit
+SafetyLimit = StackDamage:CreateSlider({
+	Name = 'Safety Limit',
+	Min = 50,
+	Max = 300,
+	Function = function(val)
+		-- This will be referenced in the burst loop
+		StackDamage.SafetyLimit = val
+	end,
+	Default = 150,
+	Suffix = ' hits',
+	Tooltip = 'Maximum hits per target before auto-release'
+})
+
+-- Add burst delay slider
+local BurstDelay
+BurstDelay = StackDamage:CreateSlider({
+	Name = 'Burst Delay',
+	Min = 0.005,
+	Max = 0.1,
+	Function = function(val)
+		StackDamage.BurstDelay = val
+	end,
+	Default = 0.01,
+	Decimal = 1000,
+	Suffix = 's',
+	Tooltip = 'Delay between each burst hit'
+})
+
+-- Initialize default values
+StackDamage.SafetyLimit = 150
+StackDamage.BurstDelay = 0.01
+
+-- Set up global access
+_G.multiplier = true
+
+-- Initialize VapeV4
 vape:Init()
+
+print('VapeV4 Stack Damage module loaded successfully!')
+print('Press the GUI toggle key to access the Combat category')
