@@ -1,7 +1,6 @@
--- VapeV4 Stack Damage & Gun Modifier Combined Script
--- Standalone Implementation
+-- VapeV4 Combat Enhancer - Compact Version
+-- Stack Damage + Gun Modifier with Libraries Integration
 
--- Load VapeV4 as Independent
 shared.VapeIndependent = true
 local vape = loadstring(
 	game:HttpGet(
@@ -10,17 +9,21 @@ local vape = loadstring(
 	)
 )()
 
--- Set config name
 vape.Place = 'CombatEnhancer'
 
--- Services
+-- Services & Libraries
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
--- Gun Modifier Constants
-local ALLOWED_GUNS = {
+-- VapeV4 Libraries
+local entitylib = vape.Libraries.entitylib
+local sessioninfo = vape.Libraries.SessionInfo
+local targetinfo = vape.Libraries.TargetInfo
+
+-- Gun Constants
+local GUNS = {
 	"Akimbo", "Voltaic Impact", "Gunslingers", "Burst Rifle", "Stonewall",
 	"Steelforge", "DMR", "Gift of Fire", "Armour Peeler", "Medical Bow",
 	"Recurve", "Vitabow", "Rifle", "Bolter", "Harpoon Gun", "RPG",
@@ -30,183 +33,120 @@ local ALLOWED_GUNS = {
 	"Machete", "Handaxes", "Torqueblade"
 }
 
--- Stack Damage Module Implementation
+-- Session tracking
+local killsTracker = sessioninfo:AddItem('Kills', 0, function(val) return val end, true)
+local hitsTracker = sessioninfo:AddItem('Hits', 0, function(val) return val end, true)
+
+-- Stack Damage Module
 local StackDamage
 StackDamage = vape.Categories.Combat:CreateModule({
 	Name = 'Stack Damage',
 	Function = function(callback)
 		if callback then
-			-- Module enabled
-			print('Stack Damage enabled - Target locking system active')
+			local originalNamecall, gameMetatable
+			local currentTarget, targetLocked, burstActive = nil, false, false
 			
-			-- Store original state
-			local originalNamecall
-			local gameMetatable
-			local targetLocked = false
-			local burstActive = false
-			local currentTarget = nil
-			
-			-- Implementation
 			pcall(function()
-				-- Get game metatable
 				gameMetatable = getrawmetatable(game)
 				setreadonly(gameMetatable, false)
-				
-				-- Store original namecall method
 				originalNamecall = gameMetatable.__namecall
 				
-				-- Override namecall method
 				gameMetatable.__namecall = newcclosure(function(self, ...)
 					local method = getnamecallmethod()
 					local args = {...}
 					
-					-- Check if this is a hit verification and module is enabled
 					if StackDamage.Enabled and 
 					   method == "FireServer" and 
 					   tostring(self) == "VerifyHit" then
 						
-						local localPlayer = game:GetService("Players").LocalPlayer
-						local character = localPlayer.Character
-						
+						local character = LocalPlayer.Character
 						if character and self:IsDescendantOf(character) then
-							-- Get target info
 							local target = args[1]
 							
 							if target and target:IsA("Humanoid") then
-								-- New target detected or target changed
-								if not burstActive or currentTarget ~= target then
-									currentTarget = target
-									targetLocked = true
-									burstActive = true
+								-- Use entity library for better target management
+								local entity = entitylib.getEntity(target.Parent)
+								if entity and entitylib.isVulnerable(entity) then
 									
-									local npcParent = target.Parent
-									local npcName = npcParent.Name
-									local startingHealth = target.Health
-									
-									print(
-										"Stack Damage: Locking onto " .. 
-										npcName .. 
-										" (Health: " .. 
-										startingHealth .. 
-										")"
-									)
-									
-									-- Spawn persistent burst loop
-									task.spawn(function()
-										local hitCount = 1
-										local activeTarget = currentTarget
-										local activeSelf = self
-										local baseArgs = args
-										local safetyLimit = StackDamage.SafetyLimit or 150
-										local burstDelay = StackDamage.BurstDelay or 0.01
+									if not burstActive or currentTarget ~= target then
+										currentTarget = target
+										targetLocked = true
+										burstActive = true
 										
-										while targetLocked and 
-											  activeTarget == currentTarget and 
-											  StackDamage.Enabled do
+										-- Add to target info display
+										targetinfo.Targets[entity] = tick() + 2
+										
+										task.spawn(function()
+											local hitCount = 1
+											local npcName = target.Parent.Name
+											local safetyLimit = StackDamage.SafetyLimit or 150
+											local burstDelay = StackDamage.BurstDelay or 0.01
 											
-											-- Check if target is still valid and alive
-											local targetHealth = activeTarget.Health
-											local targetParent = activeTarget.Parent
-											
-											if not targetParent or targetHealth <= 0 then
-												print(
-													"Stack Damage: " .. 
-													npcName .. 
-													" eliminated after " .. 
-													hitCount .. 
-													" hits!"
-												)
+											while targetLocked and 
+												  currentTarget == target and 
+												  StackDamage.Enabled do
 												
-												-- Release lock to allow new target
-												if activeTarget == currentTarget then
+												if target.Health <= 0 or not target.Parent then
+													killsTracker:Increment()
+													print("Eliminated: " .. npcName .. " (" .. hitCount .. " hits)")
 													currentTarget = nil
 													targetLocked = false
 													burstActive = false
+													break
 												end
-												break
-											end
-											
-											-- Continue burst on current target
-											hitCount = hitCount + 1
-											
-											pcall(function()
-												-- Create position variation
-												local originalPos = baseArgs[3]
 												
-												if typeof(originalPos) == "Vector3" then
-													-- Add tiny random offset
-													local variance = 0.01
-													local halfVar = variance / 2
-													local randomX = math.random() * variance - halfVar
-													local randomY = math.random() * variance - halfVar
-													local randomZ = math.random() * variance - halfVar
-													
-													local newPos = Vector3.new(
-														originalPos.X + randomX,
-														originalPos.Y + randomY,
-														originalPos.Z + randomZ
-													)
-													
-													-- Build modified args
-													local newArgs = {
-														baseArgs[1],
-														baseArgs[2],
-														newPos
-													}
-													
-													local argCount = #baseArgs
-													for j = 4, argCount do
-														newArgs[j] = baseArgs[j]
+												hitCount = hitCount + 1
+												hitsTracker:Increment()
+												
+												pcall(function()
+													local originalPos = args[3]
+													if typeof(originalPos) == "Vector3" then
+														local variance = 0.01
+														local newPos = Vector3.new(
+															originalPos.X + (math.random() - 0.5) * variance,
+															originalPos.Y + (math.random() - 0.5) * variance,
+															originalPos.Z + (math.random() - 0.5) * variance
+														)
+														
+														local newArgs = {args[1], args[2], newPos}
+														for j = 4, #args do
+															newArgs[j] = args[j]
+														end
+														
+														self.FireServer(self, unpack(newArgs))
+													else
+														self.FireServer(self, unpack(args))
 													end
-													
-													-- Fire server
-													activeSelf.FireServer(activeSelf, unpack(newArgs))
-												else
-													-- Use original args
-													activeSelf.FireServer(activeSelf, unpack(baseArgs))
-												end
-											end)
-											
-											-- Safety check
-											if hitCount > safetyLimit then
-												print(
-													"Stack Damage: Safety limit reached on " .. 
-													npcName
-												)
+												end)
 												
-												if activeTarget == currentTarget then
+												if hitCount > safetyLimit then
+													print("Safety limit reached: " .. npcName)
 													currentTarget = nil
 													targetLocked = false
 													burstActive = false
+													break
 												end
-												break
+												
+												task.wait(burstDelay)
 											end
-											
-											-- Small delay to prevent server overload
-											task.wait(burstDelay)
-										end
-									end)
+										end)
+									end
 								end
 							end
 						end
 					end
 					
-					-- Call original method
 					return originalNamecall(self, ...)
 				end)
 				
-				-- Restore metatable protection
 				setreadonly(gameMetatable, true)
 			end)
 			
-			-- Clean up when module is disabled
 			StackDamage:Clean(function()
-				-- Reset target tracking
 				currentTarget = nil
 				targetLocked = false
 				burstActive = false
 				
-				-- Restore original namecall if it exists
 				if originalNamecall and gameMetatable then
 					pcall(function()
 						setreadonly(gameMetatable, false)
@@ -215,145 +155,44 @@ StackDamage = vape.Categories.Combat:CreateModule({
 					end)
 				end
 				
-				print('Stack Damage disabled - Original hooks restored')
+				print('Stack Damage disabled')
 			end)
-			
-		else
-			-- Module disabled (cleanup handled by Clean function above)
 		end
 	end,
 	ExtraText = function()
 		return 'Burst'
 	end,
-	Tooltip = 'Multiplies damage by locking onto targets and bursting until eliminated'
+	Tooltip = 'Multiplies damage by locking onto targets until eliminated'
 })
 
--- Stack Damage Configuration Components
-local MultiplierEnabled
-MultiplierEnabled = StackDamage:CreateToggle({
-	Name = 'Damage Multiplier',
-	Function = function(callback)
-		_G.multiplier = callback
-		if callback then
-			print('Stack Damage: Multiplier enabled')
-		else
-			print('Stack Damage: Multiplier disabled')
-		end
-	end,
-	Default = true,
-	Tooltip = 'Toggle damage multiplication on/off'
-})
-
-local SafetyLimit
-SafetyLimit = StackDamage:CreateSlider({
-	Name = 'Safety Limit',
-	Min = 50,
-	Max = 300,
-	Function = function(val)
-		StackDamage.SafetyLimit = val
-	end,
-	Default = 150,
-	Suffix = ' hits',
-	Tooltip = 'Maximum hits per target before auto-release'
-})
-
-local BurstDelay
-BurstDelay = StackDamage:CreateSlider({
-	Name = 'Burst Delay',
-	Min = 0.005,
-	Max = 0.1,
-	Function = function(val)
-		StackDamage.BurstDelay = val
-	end,
-	Default = 0.01,
-	Decimal = 1000,
-	Suffix = 's',
-	Tooltip = 'Delay between each burst hit'
-})
-
--- Initialize Stack Damage default values
-StackDamage.SafetyLimit = 150
-StackDamage.BurstDelay = 0.01
-_G.multiplier = true
-
--- Gun Modifier Module Implementation
+-- Gun Modifier Module
 local GunModifier
 GunModifier = vape.Categories.Combat:CreateModule({
 	Name = 'Gun Modifier',
 	Function = function(callback)
 		if callback then
-			print('Gun Modifier enabled - Weapon enhancement active')
+			local lastWeapon, reloadCooldown = nil, 0
 			
-			-- Local variables for gun modification
-			local lastWeapon = nil
-			local reloadCooldown = 0
-			local weaponConnection
-			local reloadConnection
-			
-			-- Helper functions
 			local getWpn = function()
 				local character = LocalPlayer.Character
-				if not character then
-					return nil
-				end
+				if not character then return nil end
 				
-				local children = character:GetChildren()
-				for _, item in ipairs(children) do
-					if item:IsA("Tool") and table.find(ALLOWED_GUNS, item.Name) then
+				for _, item in pairs(character:GetChildren()) do
+					if item:IsA("Tool") and table.find(GUNS, item.Name) then
 						return item.Name
 					end
 				end
-				
-				return nil
-			end
-			
-			local getCurrentAmmo = function(tool)
-				local descendants = {tool, unpack(tool:GetDescendants())}
-				
-				for _, obj in ipairs(descendants) do
-					local attributes = obj:GetAttributes()
-					for name, value in pairs(attributes) do
-						if name:lower():find("ammo") and typeof(value) == "number" then
-							return value, obj, name
-						end
-					end
-				end
-				
-				return nil, nil, nil
-			end
-			
-			local getMaxAmmo = function(obj, attrName)
-				local attributes = obj:GetAttributes()
-				local maxValue = attributes["Max" .. attrName]
-				
-				if not maxValue then
-					maxValue = attributes[attrName .. "Max"]
-				end
-				
-				if not maxValue then
-					maxValue = attributes["MaxAmmo"]
-				end
-				
-				return maxValue or 30
 			end
 			
 			local modifyGun = function(tool)
-				if not tool or not GunModifier.Enabled then
-					return
-				end
+				if not tool or not GunModifier.Enabled then return end
 				
-				local firerateValue = GunModifier.Firerate or 500
-				local bulletSpeedValue = GunModifier.BulletSpeed or 9999
-				local spreadValue = GunModifier.Spread or 0
-				local reloadTimeValue = GunModifier.ReloadTime or 0.1
-				local infiniteAmmoEnabled = GunModifier.InfiniteAmmo or true
+				tool:SetAttribute("Firerate", GunModifier.Firerate or 500)
+				tool:SetAttribute("BulletSpeed", GunModifier.BulletSpeed or 9999)
+				tool:SetAttribute("Spread", GunModifier.Spread or 0)
+				tool:SetAttribute("ReloadTime", GunModifier.ReloadTime or 0.1)
 				
-				tool:SetAttribute("Firerate", firerateValue)
-				tool:SetAttribute("BulletSpeed", bulletSpeedValue)
-				tool:SetAttribute("Spread", spreadValue)
-				tool:SetAttribute("ReloadTime", reloadTimeValue)
-				
-				if infiniteAmmoEnabled then
+				if GunModifier.InfiniteAmmo then
 					local ammoConnection = tool:GetAttributeChangedSignal("Ammo"):Connect(function()
 						if GunModifier.Enabled then
 							tool:SetAttribute("Ammo", 999)
@@ -373,11 +212,13 @@ GunModifier = vape.Categories.Combat:CreateModule({
 				reloadCooldown = tick()
 				local descendants = {tool, unpack(tool:GetDescendants())}
 				
-				for _, obj in ipairs(descendants) do
+				for _, obj in pairs(descendants) do
 					local attributes = obj:GetAttributes()
 					for name, value in pairs(attributes) do
 						if name:lower():find("ammo") and typeof(value) == "number" then
-							local maxAmmo = getMaxAmmo(obj, name)
+							local maxAmmo = attributes["Max" .. name] or 
+											attributes[name .. "Max"] or 
+											attributes["MaxAmmo"] or 30
 							obj:SetAttribute(name, maxAmmo)
 						end
 					end
@@ -387,8 +228,7 @@ GunModifier = vape.Categories.Combat:CreateModule({
 				if character then
 					local humanoid = character:FindFirstChildOfClass("Humanoid")
 					if humanoid then
-						local tracks = humanoid:GetPlayingAnimationTracks()
-						for _, track in ipairs(tracks) do
+						for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
 							if track.Name:lower():find("reload") then
 								track:Stop()
 								track.TimePosition = track.Length
@@ -396,18 +236,13 @@ GunModifier = vape.Categories.Combat:CreateModule({
 						end
 					end
 				end
-				
-				print("Gun Modifier: Fast reload triggered")
 			end
 			
-			-- Weapon detection loop
-			weaponConnection = RunService.Heartbeat:Connect(function()
-				if not GunModifier.Enabled then
-					return
-				end
+			-- Weapon detection
+			local weaponConnection = RunService.Heartbeat:Connect(function()
+				if not GunModifier.Enabled then return end
 				
 				local newWeapon = getWpn()
-				
 				if newWeapon and newWeapon ~= lastWeapon then
 					lastWeapon = newWeapon
 					local character = LocalPlayer.Character
@@ -415,35 +250,29 @@ GunModifier = vape.Categories.Combat:CreateModule({
 						local tool = character:FindFirstChild(newWeapon)
 						if tool then
 							modifyGun(tool)
-							print("Gun Modifier: Gun modified - " .. newWeapon)
+							print("Gun modified: " .. newWeapon)
 						end
 					end
 				end
 			end)
 			
-			-- Manual reload on R key
-			reloadConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-				if gameProcessed or 
-				   input.KeyCode ~= Enum.KeyCode.R or 
-				   not GunModifier.Enabled then
+			-- Fast reload input
+			local reloadConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+				if gameProcessed or input.KeyCode ~= Enum.KeyCode.R or not GunModifier.Enabled then
 					return
 				end
 				
 				local character = LocalPlayer.Character
 				if character then
 					local tool = character:FindFirstChildOfClass("Tool")
-					if tool and table.find(ALLOWED_GUNS, tool.Name) then
+					if tool and table.find(GUNS, tool.Name) then
 						fastReload(tool)
 					end
 				end
 			end)
 			
-			-- Clean up connections when module is disabled
 			GunModifier:Clean(weaponConnection)
 			GunModifier:Clean(reloadConnection)
-			
-		else
-			print('Gun Modifier disabled')
 		end
 	end,
 	ExtraText = function()
@@ -452,9 +281,43 @@ GunModifier = vape.Categories.Combat:CreateModule({
 	Tooltip = 'Modifies weapon stats and enables fast reload'
 })
 
--- Gun Modifier Configuration Components
-local FirerateSlider
-FirerateSlider = GunModifier:CreateSlider({
+-- Stack Damage Configuration
+StackDamage:CreateToggle({
+	Name = 'Damage Multiplier',
+	Function = function(callback)
+		_G.multiplier = callback
+	end,
+	Default = true,
+	Tooltip = 'Toggle damage multiplication'
+})
+
+StackDamage:CreateSlider({
+	Name = 'Safety Limit',
+	Min = 50,
+	Max = 300,
+	Function = function(val)
+		StackDamage.SafetyLimit = val
+	end,
+	Default = 150,
+	Suffix = ' hits',
+	Tooltip = 'Maximum hits per target'
+})
+
+StackDamage:CreateSlider({
+	Name = 'Burst Delay',
+	Min = 0.005,
+	Max = 0.1,
+	Function = function(val)
+		StackDamage.BurstDelay = val
+	end,
+	Default = 0.01,
+	Decimal = 1000,
+	Suffix = 's',
+	Tooltip = 'Delay between burst hits'
+})
+
+-- Gun Modifier Configuration
+GunModifier:CreateSlider({
 	Name = 'Fire Rate',
 	Min = 100,
 	Max = 1000,
@@ -463,11 +326,10 @@ FirerateSlider = GunModifier:CreateSlider({
 	end,
 	Default = 500,
 	Suffix = ' RPM',
-	Tooltip = 'Weapon fire rate in rounds per minute'
+	Tooltip = 'Weapon fire rate'
 })
 
-local BulletSpeedSlider
-BulletSpeedSlider = GunModifier:CreateSlider({
+GunModifier:CreateSlider({
 	Name = 'Bullet Speed',
 	Min = 1000,
 	Max = 15000,
@@ -476,11 +338,10 @@ BulletSpeedSlider = GunModifier:CreateSlider({
 	end,
 	Default = 9999,
 	Suffix = ' u/s',
-	Tooltip = 'Bullet velocity in units per second'
+	Tooltip = 'Bullet velocity'
 })
 
-local SpreadSlider
-SpreadSlider = GunModifier:CreateSlider({
+GunModifier:CreateSlider({
 	Name = 'Spread',
 	Min = 0,
 	Max = 10,
@@ -490,11 +351,10 @@ SpreadSlider = GunModifier:CreateSlider({
 	Default = 0,
 	Decimal = 10,
 	Suffix = '°',
-	Tooltip = 'Weapon spread in degrees'
+	Tooltip = 'Weapon spread'
 })
 
-local ReloadTimeSlider
-ReloadTimeSlider = GunModifier:CreateSlider({
+GunModifier:CreateSlider({
 	Name = 'Reload Time',
 	Min = 0.1,
 	Max = 3.0,
@@ -504,34 +364,29 @@ ReloadTimeSlider = GunModifier:CreateSlider({
 	Default = 0.1,
 	Decimal = 10,
 	Suffix = 's',
-	Tooltip = 'Weapon reload time in seconds'
+	Tooltip = 'Reload duration'
 })
 
-local InfiniteAmmoToggle
-InfiniteAmmoToggle = GunModifier:CreateToggle({
+GunModifier:CreateToggle({
 	Name = 'Infinite Ammo',
 	Function = function(callback)
 		GunModifier.InfiniteAmmo = callback
-		if callback then
-			print('Gun Modifier: Infinite ammo enabled')
-		else
-			print('Gun Modifier: Infinite ammo disabled')
-		end
 	end,
 	Default = true,
 	Tooltip = 'Enable infinite ammunition'
 })
 
--- Initialize Gun Modifier default values
+-- Initialize default values
+StackDamage.SafetyLimit = 150
+StackDamage.BurstDelay = 0.01
 GunModifier.Firerate = 500
 GunModifier.BulletSpeed = 9999
 GunModifier.Spread = 0
 GunModifier.ReloadTime = 0.1
 GunModifier.InfiniteAmmo = true
+_G.multiplier = true
 
 -- Initialize VapeV4
 vape:Init()
 
-print('VapeV4 Combat Enhancer loaded successfully!')
-print('Features: Stack Damage + Gun Modifier')
-print('Press the GUI toggle key to access the Combat category')
+print('VapeV4 Combat Enhancer loaded - ' .. vape.Version)
