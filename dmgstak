@@ -1,0 +1,55 @@
+-- dmg multiplier 
+_G.multiplier = true
+
+pcall(function()
+    local mt = getrawmetatable(game)
+    local old = mt.__namecall
+    local burst = nil
+    
+    setreadonly(mt, false)
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        if _G.multiplier and method == "FireServer" and tostring(self) == "VerifyHit" then
+            local plr = game.Players.LocalPlayer
+            if plr.Character and self:IsDescendantOf(plr.Character) then
+                local target = args[1]
+                
+                if target and target:IsA("Humanoid") and target.Health > 0 then
+                    if burst ~= target then
+                        burst = target
+                        print("locked ->", target.Parent.Name)
+                        
+                        task.spawn(function()
+                            local hits = 0
+                            while burst == target and target.Parent and target.Health > 0 do
+                                if hits > 150 then break end
+                                hits = hits + 1
+                                
+                                local newArgs = table.clone(args)
+                                if typeof(args[3]) == "Vector3" then
+                                    -- just add random shit to position lol
+                                    newArgs[3] = args[3] + Vector3.new(math.random() * 0.01 - 0.005, math.random() * 0.01 - 0.005, math.random() * 0.01 - 0.005)
+                                end
+                                
+                                pcall(self.FireServer, self, unpack(newArgs))
+                                task.wait(0.01)
+                            end
+                            
+                            if burst == target then
+                                print(target.Parent.Name, "dead lmao", hits)
+                                burst = nil
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+        
+        return old(self, ...)
+    end)
+    setreadonly(mt, true)
+    
+    print("dmg mult loaded")
+end)
