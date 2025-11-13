@@ -1,6 +1,6 @@
 shared.VapeIndependent = true
-local vape = loadstring(game:HttpGet('https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/main/NewMainScript.lua ', true))()
-vape.Place = '8657806289' -- Place ID for Dummies Vs Noobs
+local vape = loadstring(game:HttpGet('https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/main/NewMainScript.lua', true))()
+vape.Place = 'universal' -- Place ID for Dummies Vs Noobs
 
 --[[
     Vape V4 Integrated Exploitation Framework
