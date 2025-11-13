@@ -1,4 +1,3 @@
--- dmg multiplier 
 _G.multiplier = true
 
 pcall(function()
@@ -19,7 +18,6 @@ pcall(function()
                 if target and target:IsA("Humanoid") and target.Health > 0 then
                     if burst ~= target then
                         burst = target
-                        print("locked ->", target.Parent.Name)
                         
                         task.spawn(function()
                             local hits = 0
@@ -29,7 +27,6 @@ pcall(function()
                                 
                                 local newArgs = table.clone(args)
                                 if typeof(args[3]) == "Vector3" then
-                                    -- just add random shit to position lol
                                     newArgs[3] = args[3] + Vector3.new(math.random() * 0.01 - 0.005, math.random() * 0.01 - 0.005, math.random() * 0.01 - 0.005)
                                 end
                                 
@@ -37,10 +34,7 @@ pcall(function()
                                 task.wait(0.01)
                             end
                             
-                            if burst == target then
-                                print(target.Parent.Name, "dead lmao", hits)
-                                burst = nil
-                            end
+                            if burst == target then burst = nil end
                         end)
                     end
                 end
@@ -50,6 +44,4 @@ pcall(function()
         return old(self, ...)
     end)
     setreadonly(mt, true)
-    
-    print("dmg mult loaded")
 end)
