@@ -1,0 +1,1513 @@
+shared.VapeIndependent = true
+local vape = loadstring(game:HttpGet('https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/main/NewMainScript.lua ', true))()
+vape.Place = '8657806289' -- Place ID for Dummies Vs Noobs
+
+--[[
+    Vape V4 Integrated Exploitation Framework
+    Using native Vape components and libraries
+    Integrates: Damage Multiplier, Killaura, Gun Modifier
+]]
+
+-- ========================
+-- UTILITY LAYER
+-- ========================
+local run = function(func) func() end
+local cloneref = cloneref or function(obj) return obj end
+
+local Services = {
+    Players = cloneref(game:GetService('Players')),
+    RunService = cloneref(game:GetService('RunService')),
+    UserInputService = cloneref(game:GetService('UserInputService')),
+    Workspace = cloneref(game:GetService('Workspace'))
+}
+
+local localPlayer = Services.Players.LocalPlayer
+local vape = shared.vape
+local entitylib = vape.Libraries.entity
+local targetinfo = vape.Libraries.targetinfo
+local sessioninfo = vape.Libraries.sessioninfo
+
+-- ========================
+-- SESSION TRACKING
+-- ========================
+local KillCount = sessioninfo:AddItem('Kills', 0, function(val) return val end, true)
+local DamageDealt = sessioninfo:AddItem('Damage', 0, function(val) return val end, true)
+local NPCsKilled = sessioninfo:AddItem('NPCs', 0, function(val) return val end, true)
+
+-- ========================
+-- DAMAGE MULTIPLIER MODULE
+-- ========================
+run(function()
+    local DamageMultiplier
+    local HitMultiplier
+    local MaxHits
+    local PositionVariance
+    
+    local State = {
+        OriginalNamecall = nil,
+        CurrentTarget = nil,
+        TargetLocked = false,
+        BurstActive = false
+    }
+    
+    local function startMultiplier()
+        local mt = getrawmetatable(game)
+        setreadonly(mt, false)
+        
+        State.OriginalNamecall = mt.__namecall
+        
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            local args = {...}
+            
+            if DamageMultiplier.Enabled and 
+               method == "FireServer" and 
+               tostring(self) == "VerifyHit" then
+                
+                local character = localPlayer.Character
+                
+                if character and self:IsDescendantOf(character) then
+                    local target = args[1]
+                    
+                    if target and target:IsA("Humanoid") then
+                        if not State.BurstActive or State.CurrentTarget ~= target then
+                            State.CurrentTarget = target
+                            State.TargetLocked = true
+                            State.BurstActive = true
+                            
+                            local npcParent = target.Parent
+                            local npcName = npcParent.Name
+                            
+                            task.spawn(function()
+                                local hitCount = 1
+                                local activeTarget = State.CurrentTarget
+                                local activeSelf = self
+                                local baseArgs = args
+                                
+                                while State.TargetLocked and 
+                                      activeTarget == State.CurrentTarget and
+                                      DamageMultiplier.Enabled do
+                                    
+                                    local targetHealth = activeTarget.Health
+                                    local targetParent = activeTarget.Parent
+                                    
+                                    if not targetParent or targetHealth <= 0 then
+                                        KillCount:Increment()
+                                        
+                                        if activeTarget == State.CurrentTarget then
+                                            State.CurrentTarget = nil
+                                            State.TargetLocked = false
+                                            State.BurstActive = false
+                                        end
+                                        break
+                                    end
+                                    
+                                    hitCount = hitCount + 1
+                                    DamageDealt:Increment()
+                                    
+                                    pcall(function()
+                                        local originalPos = baseArgs[3]
+                                        
+                                        if typeof(originalPos) == "Vector3" then
+                                            local variance = PositionVariance.Value
+                                            local halfVar = variance / 2
+                                            local randomX = math.random() * variance - halfVar
+                                            local randomY = math.random() * variance - halfVar
+                                            local randomZ = math.random() * variance - halfVar
+                                            
+                                            local newPos = Vector3.new(
+                                                originalPos.X + randomX,
+                                                originalPos.Y + randomY,
+                                                originalPos.Z + randomZ
+                                            )
+                                            
+                                            local newArgs = {
+                                                baseArgs[1],
+                                                baseArgs[2],
+                                                newPos
+                                            }
+                                            
+                                            for j = 4, #baseArgs do
+                                                newArgs[j] = baseArgs[j]
+                                            end
+                                            
+                                            activeSelf.FireServer(activeSelf, unpack(newArgs))
+                                        else
+                                            activeSelf.FireServer(activeSelf, unpack(baseArgs))
+                                        end
+                                    end)
+                                    
+                                    if hitCount > MaxHits.Value then
+                                        if activeTarget == State.CurrentTarget then
+                                            State.CurrentTarget = nil
+                                            State.TargetLocked = false
+                                            State.BurstActive = false
+                                        end
+                                        break
+                                    end
+                                    
+                                    task.wait(1 / HitMultiplier.Value)
+                                end
+                            end)
+                        end
+                    end
+                end
+            end
+            
+            return State.OriginalNamecall(self, ...)
+        end)
+        
+        setreadonly(mt, true)
+    end
+    
+    local function stopMultiplier()
+        if State.OriginalNamecall then
+            local mt = getrawmetatable(game)
+            setreadonly(mt, false)
+            mt.__namecall = State.OriginalNamecall
+            setreadonly(mt, true)
+        end
+        
+        State.CurrentTarget = nil
+        State.TargetLocked = false
+        State.BurstActive = false
+    end
+    
+    DamageMultiplier = vape.Categories.Combat:CreateModule({
+        Name = 'DamageMultiplier',
+        Function = function(callback)
+            if callback then
+                startMultiplier()
+            else
+                stopMultiplier()
+            end
+        end,
+        Tooltip = 'Multiplies damage by sending rapid hit verification'
+    })
+    
+    HitMultiplier = DamageMultiplier:CreateSlider({
+        Name = 'Hits Per Second',
+        Min = 10,
+        Max = 200,
+        Default = 100,
+        Tooltip = 'Number of hits sent per second'
+    })
+    
+    MaxHits = DamageMultiplier:CreateSlider({
+        Name = 'Max Hits',
+        Min = 10,
+        Max = 300,
+        Default = 150,
+        Tooltip = 'Maximum hits per target'
+    })
+    
+    PositionVariance = DamageMultiplier:CreateSlider({
+        Name = 'Position Variance',
+        Min = 0,
+        Max = 1,
+        Default = 0.01,
+        Decimal = 100,
+        Tooltip = 'Random offset to avoid detection'
+    })
+end)
+
+-- ========================
+-- KILLAURA MODULE
+-- ========================
+run(function()
+    local Killaura
+    local AttackSpeed
+    local CacheRefresh
+    local AutoEquip
+    
+    local State = {
+        CachedMeleeWeapon = nil,
+        ValidNPCsCache = {},
+        LastNPCFindTime = 0
+    }
+    
+    local EXCLUDED_NPC_NAMES = {
+        Landmine = true, Man = true, Turret = true, Stonehedge = true,
+        Sprayer = true, Sentinel = true, Refugee = true, PDC = true,
+        MADS = true, Lifeline = true, Hallucinator = true, Governor = true,
+        FAST_point = true, Barrier = true, Administrator = true
+    }
+    
+    for i = 1, 11 do
+        EXCLUDED_NPC_NAMES["dead guy " .. i] = true
+    end
+    
+    local SPECIAL_NPC_PATHS = {
+        APU = {childName = "Pilot", targetClass = "Humanoid"},
+        Tank = {childName = "PropaneTank", targetClass = "Humanoid", findAll = true},
+        Platform = {pattern = "Emplacement%d", targetClass = "Humanoid", findAll = true}
+    }
+    
+    local generateUUID = function()
+        local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+        return string.gsub(template, "[xy]", function(c)
+            local v = (c == "x") and math.random(0, 0xf) or math.random(8, 0xb)
+            return string.format("%x", v)
+        end)
+    end
+    
+    local findMeleeWeapon = function()
+        local character = localPlayer.Character
+        if not character then return nil end
+        
+        local backpack = localPlayer:FindFirstChild("Backpack")
+        local locations = {character, backpack}
+        
+        for _, location in ipairs(locations) do
+            if not location then continue end
+            
+            for _, item in ipairs(location:GetChildren()) do
+                if not item:IsA("Tool") then continue end
+                
+                local isMeleeClass = item:GetAttribute("Class") == "Melee"
+                local isShovel = item.Name == "Shovel"
+                
+                if isMeleeClass or isShovel then
+                    local verifyHit = item:FindFirstChild("VerifyHit")
+                    if verifyHit and verifyHit:IsA("RemoteEvent") then
+                        return item
+                    end
+                end
+            end
+        end
+        
+        return nil
+    end
+    
+    local findTargetInstance = function(model)
+        local specialCase = SPECIAL_NPC_PATHS[model.Name]
+        
+        if specialCase then
+            if specialCase.findAll then
+                for _, child in ipairs(model:GetChildren()) do
+                    if specialCase.pattern and string.match(child.Name, specialCase.pattern) then
+                        local target = child:FindFirstChildOfClass(specialCase.targetClass)
+                        if target and target:IsA("Humanoid") and target.Health > 0 then
+                            return target
+                        end
+                    end
+                end
+            else
+                local child = model:FindFirstChild(specialCase.childName)
+                if child then
+                    local target = child:FindFirstChildOfClass(specialCase.targetClass)
+                    if target and target:IsA("Humanoid") and target.Health > 0 then
+                        return target
+                    end
+                end
+            end
+        else
+            local humanoid = model:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                return humanoid
+            end
+        end
+        
+        return nil
+    end
+    
+    local findValidNPCs = function()
+        local character = localPlayer.Character
+        if not character then return {} end
+        
+        local validNPCs = {}
+        
+        for _, npcModel in ipairs(Services.Workspace:GetChildren()) do
+            if not npcModel:IsA("Model") then continue end
+            if EXCLUDED_NPC_NAMES[npcModel.Name] then continue end
+            if Services.Players:GetPlayerFromCharacter(npcModel) then continue end
+            
+            local targetInstance = findTargetInstance(npcModel)
+            if targetInstance then
+                table.insert(validNPCs, {
+                    model = npcModel,
+                    targetInstance = targetInstance
+                })
+            end
+        end
+        
+        return validNPCs
+    end
+    
+    local attackNPC = function(npcData)
+        if not State.CachedMeleeWeapon or not State.CachedMeleeWeapon.Parent then
+            State.CachedMeleeWeapon = findMeleeWeapon()
+            if not State.CachedMeleeWeapon then return false end
+            
+            if AutoEquip.Enabled and State.CachedMeleeWeapon.Parent ~= localPlayer.Character then
+                localPlayer.Character.Humanoid:EquipTool(State.CachedMeleeWeapon)
+            end
+        end
+        
+        if not npcData.targetInstance or not npcData.targetInstance.Parent then
+            return false
+        end
+        
+        local verifyHit = State.CachedMeleeWeapon:FindFirstChild("VerifyHit")
+        if not verifyHit or not verifyHit:IsA("RemoteEvent") then
+            State.CachedMeleeWeapon = nil
+            return false
+        end
+        
+        local uniqueID = generateUUID()
+        verifyHit:FireServer(npcData.targetInstance, uniqueID)
+        NPCsKilled:Increment()
+        return true
+    end
+    
+    Killaura = vape.Categories.Combat:CreateModule({
+        Name = 'Killaura',
+        Function = function(callback)
+            if callback then
+                task.spawn(function()
+                    while Killaura.Enabled do
+                        local currentTime = tick()
+                        
+                        if currentTime - State.LastNPCFindTime > CacheRefresh.Value then
+                            State.ValidNPCsCache = findValidNPCs()
+                            State.LastNPCFindTime = currentTime
+                        end
+                        
+                        if #State.ValidNPCsCache > 0 then
+                            for _, npcData in ipairs(State.ValidNPCsCache) do
+                                task.spawn(function()
+                                    attackNPC(npcData)
+                                end)
+                            end
+                        end
+                        
+                        task.wait(AttackSpeed.Value)
+                    end
+                end)
+            end
+        end,
+        Tooltip = 'Automatically attacks nearby NPCs with melee weapons'
+    })
+    
+    AttackSpeed = Killaura:CreateSlider({
+        Name = 'Attack Speed',
+        Min = 0.01,
+        Max = 1,
+        Default = 0.05,
+        Decimal = 100,
+        Tooltip = 'Delay between attack cycles'
+    })
+    
+    CacheRefresh = Killaura:CreateSlider({
+        Name = 'Cache Refresh',
+        Min = 0.1,
+        Max = 5,
+        Default = 0.5,
+        Decimal = 10,
+        Tooltip = 'How often to scan for NPCs'
+    })
+    
+    AutoEquip = Killaura:CreateToggle({
+        Name = 'Auto Equip',
+        Default = true,
+        Tooltip = 'Automatically equips melee weapon'
+    })
+end)
+
+-- ========================
+-- GUN MODIFIER MODULE
+-- ========================
+run(function()
+    local GunModifier
+    local Firerate
+    local BulletSpeed
+    local Spread
+    local InfiniteAmmo
+    local ReloadTime
+    local FastReload
+    
+    local State = {
+        LastWeapon = nil,
+        ReloadCooldown = 0,
+        Connection = nil,
+        InputConnection = nil
+    }
+    
+    local ALLOWED_GUNS = {
+        "Akimbo", "Voltaic Impact", "Gunslingers", "Burst Rifle", "Stonewall",
+        "Steelforge", "DMR", "Gift of Fire", "Armour Peeler", "Medical Bow",
+        "Recurve", "Vitabow", "Rifle", "Bolter", "Harpoon Gun", "RPG",
+        "Rocket Stormer", "Shockwave Device", "Shotgun", "Hallsweeper",
+        "Sprinter's Streak", "SMG", "Loose Trigger", "Twinface",
+        "Mastermind's Rifle", "Shovel", "Overcharger", "Rallying Cry",
+        "Machete", "Handaxes", "Torqueblade"
+    }
+    
+    local getWeapon = function()
+        local character = localPlayer.Character
+        if not character then return nil end
+        
+        for _, item in ipairs(character:GetChildren()) do
+            if item:IsA("Tool") and table.find(ALLOWED_GUNS, item.Name) then
+                return item
+            end
+        end
+        
+        return nil
+    end
+    
+    local modifyGun = function(tool)
+        if not tool then return end
+        
+        tool:SetAttribute("Firerate", Firerate.Value)
+        tool:SetAttribute("BulletSpeed", BulletSpeed.Value)
+        tool:SetAttribute("Spread", Spread.Value)
+        tool:SetAttribute("ReloadTime", ReloadTime.Value)
+        
+        if InfiniteAmmo.Enabled then
+            task.spawn(function()
+                while tool.Parent and GunModifier.Enabled and InfiniteAmmo.Enabled do
+                    tool:SetAttribute("Ammo", 999)
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end
+    
+    local performFastReload = function(tool)
+        if not tool or tick() - State.ReloadCooldown < 0.1 then
+            return
+        end
+        
+        State.ReloadCooldown = tick()
+        
+        for _, obj in ipairs({tool, unpack(tool:GetDescendants())}) do
+            local attributes = obj:GetAttributes()
+            for name, value in pairs(attributes) do
+                if name:lower():find("ammo") and typeof(value) == "number" then
+                    local maxAmmo = attributes["Max" .. name] or attributes[name .. "Max"] or attributes["MaxAmmo"] or 30
+                    obj:SetAttribute(name, maxAmmo)
+                end
+            end
+        end
+        
+        local character = localPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
+                    if track.Name:lower():find("reload") then
+                        track:Stop()
+                        track.TimePosition = track.Length
+                    end
+                end
+            end
+        end
+    end
+    
+    GunModifier = vape.Categories.Blatant:CreateModule({
+        Name = 'GunModifier',
+        Function = function(callback)
+            if callback then
+                State.Connection = Services.RunService.Heartbeat:Connect(function()
+                    local weapon = getWeapon()
+                    
+                    if weapon and weapon ~= State.LastWeapon then
+                        State.LastWeapon = weapon
+                        modifyGun(weapon)
+                    end
+                end)
+                
+                State.InputConnection = Services.UserInputService.InputBegan:Connect(function(input, gameProcessed)
+                    if gameProcessed or input.KeyCode ~= Enum.KeyCode.R then return end
+                    if not FastReload.Enabled then return end
+                    
+                    local weapon = getWeapon()
+                    if weapon then
+                        performFastReload(weapon)
+                    end
+                end)
+            else
+                if State.Connection then State.Connection:Disconnect() end
+                if State.InputConnection then State.InputConnection:Disconnect() end
+            end
+        end,
+        Tooltip = 'Modifies gun attributes for enhanced performance'
+    })
+    
+    Firerate = GunModifier:CreateSlider({
+        Name = 'Fire Rate',
+        Min = 100,
+        Max = 9999,
+        Default = 500,
+        Tooltip = 'Rounds per minute'
+    })
+    
+    BulletSpeed = GunModifier:CreateSlider({
+        Name = 'Bullet Speed',
+        Min = 1000,
+        Max = 99999,
+        Default = 9999,
+        Tooltip = 'Projectile velocity'
+    })
+    
+    Spread = GunModifier:CreateSlider({
+        Name = 'Spread',
+        Min = 0,
+        Max = 10,
+        Default = 0,
+        Decimal = 10,
+        Tooltip = '0 = perfect accuracy'
+    })
+    
+    ReloadTime = GunModifier:CreateSlider({
+        Name = 'Reload Time',
+        Min = 0.01,
+        Max = 3,
+        Default = 0.1,
+        Decimal = 100,
+        Tooltip = 'Time to reload in seconds'
+    })
+    
+    InfiniteAmmo = GunModifier:CreateToggle({
+        Name = 'Infinite Ammo',
+        Default = true,
+        Tooltip = 'Never run out of ammunition'
+    })
+    
+    FastReload = GunModifier:CreateToggle({
+        Name = 'Fast Reload',
+        Default = true,
+        Tooltip = 'Press R for instant reload'
+    })
+end)
+
+-- ========================
+-- PLAYER ESP MODULE
+-- ========================
+run(function()
+    local PlayerESP
+    local ShowName
+    local ShowHealth
+    local ShowDistance
+    local ESPColor
+    local TeamCheck
+    
+    local State = {
+        Objects = {},
+        Connection = nil
+    }
+    
+    local function createESP(player)
+        if player == localPlayer then return nil end
+        if not player.Character then return nil end
+        
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        local head = player.Character:FindFirstChild("Head")
+        if not humanoid or not head then return nil end
+        
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "PlayerESP"
+        billboard.AlwaysOnTop = true
+        billboard.Size = UDim2.new(0, 100, 0, 50)
+        billboard.StudsOffset = Vector3.new(0, 3, 0)
+        billboard.Parent = head
+        
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1, 0, 1, 0)
+        frame.BackgroundTransparency = 0.5
+        frame.BackgroundColor3 = Color3.fromHSV(ESPColor.Hue, ESPColor.Sat, ESPColor.Value)
+        frame.Parent = billboard
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 8)
+        corner.Parent = frame
+        
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, 0, 1, 0)
+        label.BackgroundTransparency = 1
+        label.TextColor3 = Color3.fromRGB(255, 255, 255)
+        label.TextStrokeTransparency = 0
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 12
+        label.Parent = frame
+        
+        return {Billboard = billboard, Label = label, Player = player, Humanoid = humanoid, Frame = frame}
+    end
+    
+    local function updateESP()
+        for _, esp in pairs(State.Objects) do
+            if esp.Billboard then
+                esp.Billboard:Destroy()
+            end
+        end
+        State.Objects = {}
+        
+        if not PlayerESP.Enabled then return end
+        
+        for _, player in ipairs(Services.Players:GetPlayers()) do
+            if TeamCheck.Enabled and player.Team == localPlayer.Team then continue end
+            
+            if player.Character then
+                local esp = createESP(player)
+                if esp then
+                    local text = ""
+                    
+                    if ShowName.Enabled then
+                        text = text .. player.Name .. "\n"
+                    end
+                    
+                    if ShowHealth.Enabled then
+                        text = text .. "HP: " .. math.floor(esp.Humanoid.Health) .. "\n"
+                    end
+                    
+                    if ShowDistance.Enabled and entitylib.isAlive then
+                        local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+                        if rootPart then
+                            local distance = (rootPart.Position - entitylib.character.RootPart.Position).Magnitude
+                            text = text .. math.floor(distance) .. " studs"
+                        end
+                    end
+                    
+                    esp.Label.Text = text
+                    esp.Frame.BackgroundColor3 = Color3.fromHSV(ESPColor.Hue, ESPColor.Sat, ESPColor.Value)
+                    table.insert(State.Objects, esp)
+                end
+            end
+        end
+    end
+    
+    PlayerESP = vape.Categories.Render:CreateModule({
+        Name = 'PlayerESP',
+        Function = function(callback)
+            if callback then
+                State.Connection = task.spawn(function()
+                    while PlayerESP.Enabled do
+                        updateESP()
+                        task.wait(0.5)
+                    end
+                end)
+            else
+                updateESP()
+            end
+        end,
+        Tooltip = 'Shows player information through walls'
+    })
+    
+    ShowName = PlayerESP:CreateToggle({
+        Name = 'Show Name',
+        Default = true
+    })
+    
+    ShowHealth = PlayerESP:CreateToggle({
+        Name = 'Show Health',
+        Default = true
+    })
+    
+    ShowDistance = PlayerESP:CreateToggle({
+        Name = 'Show Distance',
+        Default = true
+    })
+    
+    TeamCheck = PlayerESP:CreateToggle({
+        Name = 'Team Check',
+        Default = false,
+        Tooltip = 'Ignore teammates'
+    })
+    
+    ESPColor = PlayerESP:CreateColorSlider({
+        Name = 'ESP Color',
+        Function = function()
+            if PlayerESP.Enabled then
+                updateESP()
+            end
+        end,
+        DefaultHue = 0,
+        DefaultSat = 1,
+        DefaultValue = 1
+    })
+end)
+
+-- ========================
+-- MOVEMENT MODULES
+-- ========================
+run(function()
+    local Speed
+    local SpeedValue
+    local OriginalSpeed
+    
+    Speed = vape.Categories.Blatant:CreateModule({
+        Name = 'Speed',
+        Function = function(callback)
+            if callback then
+                if entitylib.isAlive then
+                    OriginalSpeed = entitylib.character.Humanoid.WalkSpeed
+                    entitylib.character.Humanoid.WalkSpeed = SpeedValue.Value
+                end
+            else
+                if entitylib.isAlive and OriginalSpeed then
+                    entitylib.character.Humanoid.WalkSpeed = OriginalSpeed
+                end
+            end
+        end,
+        Tooltip = 'Increases walk speed'
+    })
+    
+    SpeedValue = Speed:CreateSlider({
+        Name = 'Speed',
+        Min = 16,
+        Max = 200,
+        Default = 50,
+        Function = function(val)
+            if Speed.Enabled and entitylib.isAlive then
+                entitylib.character.Humanoid.WalkSpeed = val
+            end
+        end
+    })
+end)
+
+run(function()
+    local Fly
+    local FlySpeed
+    local BodyVelocity
+    local BodyGyro
+    local Connection
+    
+    Fly = vape.Categories.Blatant:CreateModule({
+        Name = 'Fly',
+        Function = function(callback)
+            if callback then
+                if not entitylib.isAlive then return end
+                
+                BodyVelocity = Instance.new('BodyVelocity')
+                BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                BodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                BodyVelocity.Parent = entitylib.character.RootPart
+                
+                BodyGyro = Instance.new('BodyGyro')
+                BodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+                BodyGyro.P = 9e9
+                BodyGyro.Parent = entitylib.character.RootPart
+                
+                Connection = Services.RunService.Heartbeat:Connect(function()
+                    if not Fly.Enabled or not entitylib.isAlive or not BodyVelocity then return end
+                    
+                    local camera = workspace.CurrentCamera
+                    local moveDirection = Vector3.new()
+                    
+                    if Services.UserInputService:IsKeyDown(Enum.KeyCode.W) then
+                        moveDirection = moveDirection + camera.CFrame.LookVector
+                    end
+                    if Services.UserInputService:IsKeyDown(Enum.KeyCode.S) then
+                        moveDirection = moveDirection - camera.CFrame.LookVector
+                    end
+                    if Services.UserInputService:IsKeyDown(Enum.KeyCode.A) then
+                        moveDirection = moveDirection - camera.CFrame.RightVector
+                    end
+                    if Services.UserInputService:IsKeyDown(Enum.KeyCode.D) then
+                        moveDirection = moveDirection + camera.CFrame.RightVector
+                    end
+                    if Services.UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                        moveDirection = moveDirection + Vector3.new(0, 1, 0)
+                    end
+                    if Services.UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+                        moveDirection = moveDirection - Vector3.new(0, 1, 0)
+                    end
+                    
+                    if moveDirection.Magnitude > 0 then
+                        BodyVelocity.Velocity = moveDirection.Unit * FlySpeed.Value
+                    else
+                        BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                    end
+                    
+                    BodyGyro.CFrame = camera.CFrame
+                end)
+            else
+                if BodyVelocity then BodyVelocity:Destroy() end
+                if BodyGyro then BodyGyro:Destroy() end
+                if Connection then Connection:Disconnect() end
+            end
+        end,
+        Tooltip = 'WASD to move, Space/Shift for up/down'
+    })
+    
+    FlySpeed = Fly:CreateSlider({
+        Name = 'Fly Speed',
+        Min = 10,
+        Max = 200,
+        Default = 50
+    })
+end)
+
+run(function()
+    local NoClip
+    local Connection
+    
+    NoClip = vape.Categories.Blatant:CreateModule({
+        Name = 'NoClip',
+        Function = function(callback)
+            if callback then
+                Connection = Services.RunService.Stepped:Connect(function()
+                    if not NoClip.Enabled or not entitylib.isAlive then return end
+                    
+                    for _, part in pairs(entitylib.character.Character:GetDescendants()) do
+                        if part:IsA('BasePart') then
+                            part.CanCollide = false
+                        end
+                    end
+                end)
+            else
+                if Connection then Connection:Disconnect() end
+                
+                if entitylib.isAlive then
+                    for _, part in pairs(entitylib.character.Character:GetDescendants()) do
+                        if part:IsA('BasePart') then
+                            part.CanCollide = true
+                        end
+                    end
+                end
+            end
+        end,
+        Tooltip = 'Walk through walls'
+    })
+end)
+
+-- ========================
+-- UTILITY MODULES
+-- ========================
+run(function()
+    local FullBright
+    local OriginalAmbient
+    local OriginalBrightness
+    
+    FullBright = vape.Categories.Render:CreateModule({
+        Name = 'FullBright',
+        Function = function(callback)
+            local lighting = game:GetService("Lighting")
+            
+            if callback then
+                OriginalAmbient = lighting.Ambient
+                OriginalBrightness = lighting.Brightness
+                
+                lighting.Ambient = Color3.fromRGB(255, 255, 255)
+                lighting.Brightness = 2
+            else
+                if OriginalAmbient then
+                    lighting.Ambient = OriginalAmbient
+                end
+                if OriginalBrightness then
+                    lighting.Brightness = OriginalBrightness
+                end
+            end
+        end,
+        Tooltip = 'Removes darkness and shadows'
+    })
+end)
+
+run(function()
+    local FOVChanger
+    local FOVValue
+    local OriginalFOV
+    
+    FOVChanger = vape.Categories.Render:CreateModule({
+        Name = 'FOV',
+        Function = function(callback)
+            local camera = workspace.CurrentCamera
+            
+            if callback then
+                OriginalFOV = camera.FieldOfView
+                camera.FieldOfView = FOVValue.Value
+            else
+                camera.FieldOfView = OriginalFOV or 70
+            end
+        end,
+        Tooltip = 'Modifies field of view'
+    })
+    
+    FOVValue = FOVChanger:CreateSlider({
+        Name = 'FOV',
+        Min = 70,
+        Max = 120,
+        Default = 90,
+        Function = function(val)
+            if FOVChanger.Enabled then
+                workspace.CurrentCamera.FieldOfView = val
+            end
+        end
+    })
+end)
+
+run(function()
+    local AntiAFK
+    
+    AntiAFK = vape.Categories.Utility:CreateModule({
+        Name = 'AntiAFK',
+        Function = function(callback)
+            if callback then
+                local VirtualUser = game:GetService("VirtualUser")
+                
+                localPlayer.Idled:Connect(function()
+                    if AntiAFK.Enabled then
+                        VirtualUser:CaptureController()
+                        VirtualUser:ClickButton2(Vector2.new())
+                    end
+                end)
+            end
+        end,
+        Tooltip = 'Prevents being kicked for inactivity'
+    })
+end)
+
+-- ========================
+-- ADVANCED COMBAT MODULES
+-- ========================
+run(function()
+    local AutoParry
+    local ParryDistance
+    local VisualWarning
+    
+    local State = {
+        Connection = nil,
+        WarningLabel = nil
+    }
+    
+    local function createWarning()
+        if State.WarningLabel then return end
+        
+        local screenGui = Instance.new("ScreenGui")
+        screenGui.Name = "ParryWarning"
+        screenGui.ResetOnSpawn = false
+        screenGui.Parent = localPlayer.PlayerGui
+        
+        State.WarningLabel = Instance.new("TextLabel")
+        State.WarningLabel.Size = UDim2.new(0, 300, 0, 50)
+        State.WarningLabel.Position = UDim2.new(0.5, -150, 0.15, 0)
+        State.WarningLabel.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+        State.WarningLabel.BackgroundTransparency = 0.3
+        State.WarningLabel.Text = "⚠ THREAT DETECTED ⚠"
+        State.WarningLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        State.WarningLabel.TextStrokeTransparency = 0
+        State.WarningLabel.Font = Enum.Font.GothamBold
+        State.WarningLabel.TextSize = 20
+        State.WarningLabel.Visible = false
+        State.WarningLabel.Parent = screenGui
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 10)
+        corner.Parent = State.WarningLabel
+    end
+    
+    local function removeWarning()
+        if State.WarningLabel then
+            State.WarningLabel.Parent:Destroy()
+            State.WarningLabel = nil
+        end
+    end
+    
+    AutoParry = vape.Categories.Combat:CreateModule({
+        Name = 'AutoParry',
+        Function = function(callback)
+            if callback then
+                if VisualWarning.Enabled then
+                    createWarning()
+                end
+                
+                State.Connection = Services.RunService.Heartbeat:Connect(function()
+                    if not entitylib.isAlive then return end
+                    
+                    local nearestPlayer = nil
+                    local nearestDistance = ParryDistance.Value
+                    
+                    for _, ent in pairs(entitylib.List) do
+                        if ent.Targetable and ent.RootPart then
+                            local distance = (ent.RootPart.Position - entitylib.character.RootPart.Position).Magnitude
+                            
+                            if distance < nearestDistance then
+                                nearestPlayer = ent
+                                nearestDistance = distance
+                            end
+                        end
+                    end
+                    
+                    if nearestPlayer and State.WarningLabel then
+                        State.WarningLabel.Visible = true
+                        State.WarningLabel.Text = "⚠ " .. nearestPlayer.Player.Name .. " - " .. math.floor(nearestDistance) .. " studs ⚠"
+                    elseif State.WarningLabel then
+                        State.WarningLabel.Visible = false
+                    end
+                end)
+            else
+                if State.Connection then
+                    State.Connection:Disconnect()
+                end
+                removeWarning()
+            end
+        end,
+        Tooltip = 'Detects nearby threats for manual parrying'
+    })
+    
+    ParryDistance = AutoParry:CreateSlider({
+        Name = 'Detection Range',
+        Min = 10,
+        Max = 100,
+        Default = 30,
+        Tooltip = 'Distance to detect threats'
+    })
+    
+    VisualWarning = AutoParry:CreateToggle({
+        Name = 'Visual Warning',
+        Default = true,
+        Function = function(val)
+            if val and AutoParry.Enabled then
+                createWarning()
+            else
+                removeWarning()
+            end
+        end,
+        Tooltip = 'Show on-screen warning'
+    })
+end)
+
+run(function()
+    local TargetStrafe
+    local StrafeSpeed
+    local StrafeRadius
+    local StrafeHeight
+    
+    local State = {
+        Connection = nil,
+        Angle = 0
+    }
+    
+    TargetStrafe = vape.Categories.Combat:CreateModule({
+        Name = 'TargetStrafe',
+        Function = function(callback)
+            if callback then
+                State.Connection = Services.RunService.Heartbeat:Connect(function()
+                    if not entitylib.isAlive then return end
+                    
+                    local target = entitylib.EntityPosition({
+                        Range = 100,
+                        Part = 'RootPart',
+                        Players = true
+                    })
+                    
+                    if target and target.RootPart then
+                        State.Angle = State.Angle + (StrafeSpeed.Value * 0.01)
+                        
+                        local targetPos = target.RootPart.Position
+                        local offsetX = math.cos(State.Angle) * StrafeRadius.Value
+                        local offsetZ = math.sin(State.Angle) * StrafeRadius.Value
+                        
+                        local newPosition = Vector3.new(
+                            targetPos.X + offsetX,
+                            targetPos.Y + StrafeHeight.Value,
+                            targetPos.Z + offsetZ
+                        )
+                        
+                        entitylib.character.RootPart.CFrame = CFrame.new(newPosition, targetPos)
+                    end
+                end)
+            else
+                if State.Connection then
+                    State.Connection:Disconnect()
+                end
+                State.Angle = 0
+            end
+        end,
+        Tooltip = 'Circles around the nearest target'
+    })
+    
+    StrafeSpeed = TargetStrafe:CreateSlider({
+        Name = 'Speed',
+        Min = 1,
+        Max = 10,
+        Default = 3,
+        Tooltip = 'Rotation speed'
+    })
+    
+    StrafeRadius = TargetStrafe:CreateSlider({
+        Name = 'Radius',
+        Min = 5,
+        Max = 30,
+        Default = 15,
+        Tooltip = 'Circle radius in studs'
+    })
+    
+    StrafeHeight = TargetStrafe:CreateSlider({
+        Name = 'Height Offset',
+        Min = -10,
+        Max = 10,
+        Default = 0,
+        Tooltip = 'Vertical offset from target'
+    })
+end)
+
+-- ========================
+-- ADVANCED VISUALS
+-- ========================
+run(function()
+    local Tracers
+    local TracerColor
+    local TracerThickness
+    local TracerTransparency
+    local TeamCheck
+    
+    local State = {
+        Tracers = {},
+        Connection = nil
+    }
+    
+    local function createTracer(player)
+        if player == localPlayer then return nil end
+        if TeamCheck.Enabled and player.Team == localPlayer.Team then return nil end
+        if not player.Character then return nil end
+        
+        local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+        if not rootPart then return nil end
+        
+        local attachment0 = Instance.new("Attachment")
+        attachment0.Parent = workspace.CurrentCamera
+        
+        local attachment1 = Instance.new("Attachment")
+        attachment1.Parent = rootPart
+        
+        local beam = Instance.new("Beam")
+        beam.Attachment0 = attachment0
+        beam.Attachment1 = attachment1
+        beam.Color = ColorSequence.new(Color3.fromHSV(TracerColor.Hue, TracerColor.Sat, TracerColor.Value))
+        beam.Width0 = TracerThickness.Value
+        beam.Width1 = TracerThickness.Value
+        beam.Transparency = NumberSequence.new(TracerTransparency.Value)
+        beam.FaceCamera = true
+        beam.Parent = workspace.CurrentCamera
+        
+        return {Beam = beam, Attachment0 = attachment0, Attachment1 = attachment1, Player = player}
+    end
+    
+    local function updateTracers()
+        for _, tracer in pairs(State.Tracers) do
+            if tracer.Beam then tracer.Beam:Destroy() end
+            if tracer.Attachment0 then tracer.Attachment0:Destroy() end
+            if tracer.Attachment1 then tracer.Attachment1:Destroy() end
+        end
+        State.Tracers = {}
+        
+        if not Tracers.Enabled then return end
+        
+        for _, player in ipairs(Services.Players:GetPlayers()) do
+            local tracer = createTracer(player)
+            if tracer then
+                table.insert(State.Tracers, tracer)
+            end
+        end
+    end
+    
+    Tracers = vape.Categories.Render:CreateModule({
+        Name = 'Tracers',
+        Function = function(callback)
+            if callback then
+                State.Connection = task.spawn(function()
+                    while Tracers.Enabled do
+                        updateTracers()
+                        task.wait(1)
+                    end
+                end)
+            else
+                updateTracers()
+            end
+        end,
+        Tooltip = 'Draws lines to players'
+    })
+    
+    TracerColor = Tracers:CreateColorSlider({
+        Name = 'Color',
+        Function = function()
+            if Tracers.Enabled then
+                for _, tracer in pairs(State.Tracers) do
+                    if tracer.Beam then
+                        tracer.Beam.Color = ColorSequence.new(Color3.fromHSV(TracerColor.Hue, TracerColor.Sat, TracerColor.Value))
+                    end
+                end
+            end
+        end
+    })
+    
+    TracerThickness = Tracers:CreateSlider({
+        Name = 'Thickness',
+        Min = 0.1,
+        Max = 5,
+        Default = 1,
+        Decimal = 10,
+        Function = function(val)
+            if Tracers.Enabled then
+                for _, tracer in pairs(State.Tracers) do
+                    if tracer.Beam then
+                        tracer.Beam.Width0 = val
+                        tracer.Beam.Width1 = val
+                    end
+                end
+            end
+        end
+    })
+    
+    TracerTransparency = Tracers:CreateSlider({
+        Name = 'Transparency',
+        Min = 0,
+        Max = 1,
+        Default = 0.5,
+        Decimal = 10,
+        Function = function(val)
+            if Tracers.Enabled then
+                for _, tracer in pairs(State.Tracers) do
+                    if tracer.Beam then
+                        tracer.Beam.Transparency = NumberSequence.new(val)
+                    end
+                end
+            end
+        end
+    })
+    
+    TeamCheck = Tracers:CreateToggle({
+        Name = 'Team Check',
+        Default = false,
+        Function = function()
+            if Tracers.Enabled then
+                updateTracers()
+            end
+        end
+    })
+end)
+
+run(function()
+    local Chams
+    local ChamsColor
+    local ChamsTransparency
+    local TeamCheck
+    
+    local State = {
+        Highlights = {},
+        Connection = nil
+    }
+    
+    local function createCham(player)
+        if player == localPlayer then return nil end
+        if TeamCheck.Enabled and player.Team == localPlayer.Team then return nil end
+        if not player.Character then return nil end
+        
+        local highlight = Instance.new("Highlight")
+        highlight.Adornee = player.Character
+        highlight.FillColor = Color3.fromHSV(ChamsColor.Hue, ChamsColor.Sat, ChamsColor.Value)
+        highlight.FillTransparency = ChamsTransparency.Value
+        highlight.OutlineTransparency = 1
+        highlight.Parent = player.Character
+        
+        return {Highlight = highlight, Player = player}
+    end
+    
+    local function updateChams()
+        for _, cham in pairs(State.Highlights) do
+            if cham.Highlight then
+                cham.Highlight:Destroy()
+            end
+        end
+        State.Highlights = {}
+        
+        if not Chams.Enabled then return end
+        
+        for _, player in ipairs(Services.Players:GetPlayers()) do
+            local cham = createCham(player)
+            if cham then
+                table.insert(State.Highlights, cham)
+            end
+        end
+    end
+    
+    Chams = vape.Categories.Render:CreateModule({
+        Name = 'Chams',
+        Function = function(callback)
+            if callback then
+                State.Connection = task.spawn(function()
+                    while Chams.Enabled do
+                        updateChams()
+                        task.wait(1)
+                    end
+                end)
+            else
+                updateChams()
+            end
+        end,
+        Tooltip = 'Highlights players through walls'
+    })
+    
+    ChamsColor = Chams:CreateColorSlider({
+        Name = 'Color',
+        Function = function()
+            if Chams.Enabled then
+                for _, cham in pairs(State.Highlights) do
+                    if cham.Highlight then
+                        cham.Highlight.FillColor = Color3.fromHSV(ChamsColor.Hue, ChamsColor.Sat, ChamsColor.Value)
+                    end
+                end
+            end
+        end
+    })
+    
+    ChamsTransparency = Chams:CreateSlider({
+        Name = 'Transparency',
+        Min = 0,
+        Max = 1,
+        Default = 0.5,
+        Decimal = 10,
+        Function = function(val)
+            if Chams.Enabled then
+                for _, cham in pairs(State.Highlights) do
+                    if cham.Highlight then
+                        cham.Highlight.FillTransparency = val
+                    end
+                end
+            end
+        end
+    })
+    
+    TeamCheck = Chams:CreateToggle({
+        Name = 'Team Check',
+        Default = false,
+        Function = function()
+            if Chams.Enabled then
+                updateChams()
+            end
+        end
+    })
+end)
+
+-- ========================
+-- MISC UTILITY FUNCTIONS
+-- ========================
+run(function()
+    local AutoRespawn
+    local RespawnDelay
+    
+    local State = {
+        Connection = nil
+    }
+    
+    AutoRespawn = vape.Categories.Utility:CreateModule({
+        Name = 'AutoRespawn',
+        Function = function(callback)
+            if callback then
+                State.Connection = entitylib.Events.LocalRemoved:Connect(function()
+                    task.wait(RespawnDelay.Value)
+                    if AutoRespawn.Enabled then
+                        localPlayer.Character:BreakJoints()
+                    end
+                end)
+            else
+                if State.Connection then
+                    State.Connection:Disconnect()
+                end
+            end
+        end,
+        Tooltip = 'Automatically respawns on death'
+    })
+    
+    RespawnDelay = AutoRespawn:CreateSlider({
+        Name = 'Delay',
+        Min = 0,
+        Max = 5,
+        Default = 1,
+        Decimal = 10,
+        Tooltip = 'Seconds before respawn'
+    })
+end)
+
+run(function()
+    local InfiniteJump
+    local Connection
+    
+    InfiniteJump = vape.Categories.Blatant:CreateModule({
+        Name = 'InfiniteJump',
+        Function = function(callback)
+            if callback then
+                Connection = Services.UserInputService.JumpRequest:Connect(function()
+                    if entitylib.isAlive then
+                        entitylib.character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                    end
+                end)
+            else
+                if Connection then
+                    Connection:Disconnect()
+                end
+            end
+        end,
+        Tooltip = 'Jump infinitely in the air'
+    })
+end)
+
+run(function()
+    local RemoveEffects
+    
+    RemoveEffects = vape.Categories.Render:CreateModule({
+        Name = 'RemoveEffects',
+        Function = function(callback)
+            local camera = workspace.CurrentCamera
+            
+            if callback then
+                for _, effect in pairs(camera:GetChildren()) do
+                    if effect:IsA("BlurEffect") or effect:IsA("DepthOfFieldEffect") or effect:IsA("ColorCorrectionEffect") then
+                        effect.Enabled = false
+                    end
+                end
+            else
+                for _, effect in pairs(camera:GetChildren()) do
+                    if effect:IsA("BlurEffect") or effect:IsA("DepthOfFieldEffect") or effect:IsA("ColorCorrectionEffect") then
+                        effect.Enabled = true
+                    end
+                end
+            end
+        end,
+        Tooltip = 'Removes visual effects like blur'
+    })
+end)
+
+-- ========================
+-- NOTIFICATION SYSTEM
+-- ========================
+vape:CreateNotification(
+    'Framework Loaded',
+    'Vape V4 Integration - All modules loaded successfully\nPress ' .. tostring(vape.Keybind) .. ' to open menu',
+    10,
+    'info'
+)
+
+-- ========================
+-- CLEANUP HANDLER
+-- ========================
+vape:Clean(function()
+    print('[Framework] Cleaning up integrated modules')
+    
+    -- Reset session stats
+    if sessioninfo then
+        for name, item in pairs(sessioninfo.Objects) do
+            if name == 'Kills' or name == 'Damage' or name == 'NPCs' then
+                sessioninfo.Objects[name] = nil
+            end
+        end
+    end
+end)
+
+print('[Framework] Vape V4 Integration loaded successfully!')
+print('Total Modules Added: Combat (4) | Blatant (6) | Render (6) | Utility (3)')
+print('Session tracking enabled for Kills, Damage, and NPCs')
+
+return {
+    Version = '1.0.0',
+    Modules = {
+        Combat = {'DamageMultiplier', 'Killaura', 'AutoParry', 'TargetStrafe'},
+        Blatant = {'GunModifier', 'Speed', 'Fly', 'NoClip', 'InfiniteJump'},
+        Render = {'PlayerESP', 'FullBright', 'FOV', 'Tracers', 'Chams', 'RemoveEffects'},
+        Utility = {'AntiAFK', 'AutoRespawn'}
+    },
+    SessionInfo = sessioninfo,
+    EntityLib = entitylib
+}
