@@ -61,25 +61,11 @@ end
 
 task.spawn(function()
 	while task.wait(0.05) do
-		-- Main workspace loop
 		for _, model in ipairs(workspace:GetChildren()) do
 			if model:IsA("Model") and not EXCLUDED[model.Name] and not Players:GetPlayerFromCharacter(model) then
 				local target = getTarget(model)
 				if target and target.Health > 0 then
 					task.spawn(attack, target)
-				end
-			end
-		end
-
-		-- Specific folder loop for "Noobs"
-		local noobsFolder = workspace:FindFirstChild("Noobs")
-		if noobsFolder then
-			for _, model in ipairs(noobsFolder:GetChildren()) do
-				if model:IsA("Model") then
-					local target = getTarget(model)
-					if target and target.Health > 0 then
-						task.spawn(attack, target)
-					end
 				end
 			end
 		end
