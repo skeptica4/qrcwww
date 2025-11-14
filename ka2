@@ -1,365 +1,60 @@
--- Mobile-Enabled Killaura Script
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+task.spawn(function()
+ local Players = game:GetService("Players")
+ local RunService = game:GetService("RunService")
+ local UserInputService = game:GetService("UserInputService")
+ local LocalPlayer = Players.LocalPlayer
+ local enabled = false
+ local attackRange = 100
+ local loopDelay = 0.05
 
-local LocalPlayer = Players.LocalPlayer
+ local function getMeleeWeapon()
+  local char = LocalPlayer.Character
+  if not char then return nil end
 
--- Mobile detection
-local isMobile = (not UserInputService.KeyboardEnabled)
+  for _, container in {char, LocalPlayer.Backpack} do
+   if not container then continue end
+   for _, item in ipairs(container:GetChildren()) do
+    if item:IsA("Tool") and item:FindFirstChild("VerifyHit") then
+     return item
+    end
+   end
+  end
+  return nil
+ end
 
--- Configuration
-local CONFIG = {
-	enabled = false,
-	attackLoopWaitTime = 0.01,
-	npcCacheRefreshRate = 0.5
-}
+ UserInputService.InputBegan:Connect(function(input, gp)
+  if not gp and input.KeyCode == Enum.KeyCode.Z then
+   enabled = not enabled
+  end
+ end)
 
-local EXCLUDED_NPC_NAMES = {
-	Landmine = true, Man = true, Turret = true, Stonehedge = true,
-	Sprayer = true, Sentinel = true, Refugee = true, PDC = true,
-	MADS = true, Lifeline = true, Hallucinator = true, Governor = true,
-	FAST_point = true, Barrier = true, Administrator = true
-}
+ while true do
+  task.wait(loopDelay)
+  if not enabled then continue end
 
-for i = 1, 11 do
-	EXCLUDED_NPC_NAMES["dead guy " .. i] = true
-end
+  local char = LocalPlayer.Character
+  local root = char and char:FindFirstChild("HumanoidRootPart")
+  if not root then continue end
 
-local SPECIAL_NPC_PATHS = {
-	APU = {childName = "Pilot", targetClass = "Humanoid"},
-	Tank = {childName = "PropaneTank", targetClass = "Humanoid", findAll = true},
-	Platform = {pattern = "Emplacement%d", targetClass = "Humanoid", findAll = true}
-}
+  local weapon = getMeleeWeapon()
+  if not weapon then continue end
 
-local NPC_RELATIONSHIPS = {
-	Drone = {protects = "Achilles"}
-}
+  local closestTarget, minDist = nil, attackRange
+  for _, model in ipairs(workspace:GetChildren()) do
+   local hum = model:FindFirstChildOfClass("Humanoid")
+   local hrp = model:FindFirstChild("HumanoidRootPart")
 
-local cachedMeleeWeapon = nil
-local validNPCsCache = {}
-local lastNPCFindTime = 0
-local currentTargetLock = nil
-local burstActive = false
+   if hum and hrp and hum.Health > 0 and model ~= char and not Players:GetPlayerFromCharacter(model) then
+    local dist = (root.Position - hrp.Position).Magnitude
+    if dist < minDist then
+     minDist = dist
+     closestTarget = hum
+    end
+   end
+  end
 
-local generateUUID = function()
-	local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
-	return string.gsub(template, "[xy]", function(c)
-		local v = (c == "x") and math.random(0, 0xf) or math.random(8, 0xb)
-		return string.format("%x", v)
-	end)
-end
-
-local getCharacter = function()
-	return LocalPlayer.Character
-end
-
-local findMeleeWeapon = function()
-	local character = getCharacter()
-	if not character then
-		return nil
-	end
-	
-	local backpack = LocalPlayer:FindFirstChild("Backpack")
-	local locations = {character, backpack}
-	
-	for _, location in ipairs(locations) do
-		if not location then
-			continue
-		end
-		
-		local children = location:GetChildren()
-		for _, item in ipairs(children) do
-			if not item:IsA("Tool") then
-				continue
-			end
-			
-			local isMeleeClass = item:GetAttribute("Class") == "Melee"
-			local isShovel = item.Name == "Shovel"
-			
-			if isMeleeClass or isShovel then
-				local verifyHit = item:FindFirstChild("VerifyHit")
-				if verifyHit and verifyHit:IsA("RemoteEvent") then
-					return item
-				end
-			end
-		end
-	end
-	
-	return nil
-end
-
-local findTargetInstance = function(model)
-	local specialCase = SPECIAL_NPC_PATHS[model.Name]
-	
-	if specialCase then
-		if specialCase.findAll then
-			local children = model:GetChildren()
-			for _, child in ipairs(children) do
-				local isMatch = specialCase.pattern and string.match(child.Name, specialCase.pattern)
-				if not isMatch then
-					continue
-				end
-				
-				local target = child:FindFirstChildOfClass(specialCase.targetClass)
-				if target and target:IsA("Humanoid") and target.Health > 0 then
-					return target
-				end
-			end
-		else
-			local child = model:FindFirstChild(specialCase.childName)
-			if child then
-				local target = child:FindFirstChildOfClass(specialCase.targetClass)
-				if target and target:IsA("Humanoid") and target.Health > 0 then
-					return target
-				end
-			end
-		end
-	else
-		local humanoid = model:FindFirstChildOfClass("Humanoid")
-		if humanoid and humanoid.Health > 0 then
-			return humanoid
-		end
-	end
-	
-	return nil
-end
-
-local areAllEmplacementsDestroyed = function(platform)
-	local children = platform:GetChildren()
-	for _, child in ipairs(children) do
-		if string.match(child.Name, "Emplacement%d") then
-			local humanoid = child:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 then
-				return false
-			end
-		end
-	end
-	return true
-end
-
-local findValidNPCs = function()
-	local character = getCharacter()
-	if not character then
-		return {}
-	end
-	
-	local validNPCs = {}
-	local protectorStates = {}
-	local priorityTargets = {}
-	
-	local workspaceChildren = workspace:GetChildren()
-	for _, npcModel in ipairs(workspaceChildren) do
-		if not npcModel:IsA("Model") then
-			continue
-		end
-		
-		local relationship = NPC_RELATIONSHIPS[npcModel.Name]
-		if not relationship or not relationship.protects then
-			continue
-		end
-		
-		local protectorHumanoid = npcModel:FindFirstChildOfClass("Humanoid")
-		local isDead = (not protectorHumanoid or protectorHumanoid.Health <= 0)
-		
-		if type(relationship.protects) == "string" then
-			protectorStates[relationship.protects] = {isProtectorDead = isDead}
-		end
-		
-		if not isDead then
-			table.insert(priorityTargets, {
-				model = npcModel,
-				targetInstance = protectorHumanoid,
-				priority = true
-			})
-		end
-	end
-	
-	for _, npcModel in ipairs(workspaceChildren) do
-		if not npcModel:IsA("Model") then
-			continue
-		end
-		
-		if EXCLUDED_NPC_NAMES[npcModel.Name] then
-			continue
-		end
-		
-		if Players:GetPlayerFromCharacter(npcModel) then
-			continue
-		end
-		
-		if npcModel.Name == "Platform" then
-			if areAllEmplacementsDestroyed(npcModel) then
-				local mainHumanoid = npcModel:FindFirstChildOfClass("Humanoid")
-				if mainHumanoid and mainHumanoid.Health > 0 then
-					table.insert(validNPCs, {model = npcModel, targetInstance = mainHumanoid})
-				end
-			else
-				local children = npcModel:GetChildren()
-				for _, child in ipairs(children) do
-					if string.match(child.Name, "Emplacement%d") then
-						local target = child:FindFirstChildOfClass("Humanoid")
-						if target and target.Health > 0 then
-							table.insert(validNPCs, {model = npcModel, targetInstance = target})
-						end
-					end
-				end
-			end
-			continue
-		end
-		
-		local targetInstance = findTargetInstance(npcModel)
-		if targetInstance then
-			table.insert(validNPCs, {model = npcModel, targetInstance = targetInstance})
-		end
-	end
-	
-	for i = #priorityTargets, 1, -1 do
-		table.insert(validNPCs, 1, priorityTargets[i])
-	end
-	
-	return validNPCs
-end
-
-local burstAttackTarget = function(npcData)
-	if burstActive then
-		return
-	end
-	
-	burstActive = true
-	currentTargetLock = npcData.targetInstance
-	
-	task.spawn(function()
-		local targetInstance = npcData.targetInstance
-		local targetParent = targetInstance.Parent
-		local targetName = targetParent and targetParent.Name or "Unknown"
-		
-		while burstActive and CONFIG.enabled and currentTargetLock == targetInstance do
-			if not cachedMeleeWeapon or not cachedMeleeWeapon.Parent then
-				cachedMeleeWeapon = findMeleeWeapon()
-				if not cachedMeleeWeapon then
-					task.wait(0.1)
-					continue
-				end
-			end
-			
-			local targetHealth = targetInstance.Health
-			local targetStillExists = targetInstance.Parent
-			
-			if not targetStillExists or targetHealth <= 0 then
-				burstActive = false
-				currentTargetLock = nil
-				break
-			end
-			
-			local verifyHit = cachedMeleeWeapon:FindFirstChild("VerifyHit")
-			if verifyHit and verifyHit:IsA("RemoteEvent") then
-				local uniqueID = generateUUID()
-				verifyHit:FireServer(targetInstance, uniqueID)
-			else
-				cachedMeleeWeapon = nil
-			end
-			
-			task.wait(CONFIG.attackLoopWaitTime)
-		end
-	end)
-end
-
--- Desktop mode
-if not isMobile then
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed or input.KeyCode ~= Enum.KeyCode.Z then
-			return
-		end
-		
-		CONFIG.enabled = not CONFIG.enabled
-		print("Killaura " .. (CONFIG.enabled and "Enabled" or "Disabled"))
-	end)
-	
-	coroutine.wrap(function()
-		while true do
-			if CONFIG.enabled then
-				local currentTime = tick()
-				
-				if currentTime - lastNPCFindTime > CONFIG.npcCacheRefreshRate then
-					validNPCsCache = findValidNPCs()
-					lastNPCFindTime = currentTime
-				end
-				
-				if not burstActive and #validNPCsCache > 0 then
-					burstAttackTarget(validNPCsCache[1])
-				end
-			end
-			
-			wait(CONFIG.npcCacheRefreshRate)
-		end
-	end)()
-else
-	-- Mobile touch UI
-	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "KillauraUIMobile"
-	screenGui.ResetOnSpawn = false
-	screenGui.Parent = playerGui
-	
-	local toggleButton = Instance.new("TextButton")
-	toggleButton.Name = "KillauraToggle"
-	toggleButton.Size = UDim2.fromOffset(100, 100)
-	toggleButton.Position = UDim2.fromOffset(10, 290)
-	toggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-	toggleButton.BackgroundTransparency = 0.6
-	toggleButton.Text = "KILL\nOFF"
-	toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	toggleButton.Font = Enum.Font.GothamBold
-	toggleButton.TextSize = 14
-	toggleButton.BorderSizePixel = 0
-	toggleButton.Parent = screenGui
-	
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = toggleButton
-	
-	toggleButton.Activated:Connect(function()
-		CONFIG.enabled = not CONFIG.enabled
-		toggleButton.Text = CONFIG.enabled and "KILL\nON" or "KILL\nOFF"
-		toggleButton.BackgroundColor3 = CONFIG.enabled and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(200, 50, 50)
-	end)
-	
-	local npcCount = Instance.new("TextLabel")
-	npcCount.Name = "NPCCount"
-	npcCount.Size = UDim2.fromOffset(100, 50)
-	npcCount.Position = UDim2.fromOffset(10, 400)
-	npcCount.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	npcCount.BackgroundTransparency = 0.3
-	npcCount.Text = "NPCs: 0"
-	npcCount.TextColor3 = Color3.fromRGB(255, 255, 255)
-	npcCount.Font = Enum.Font.Gotham
-	npcCount.TextSize = 12
-	npcCount.Parent = screenGui
-	
-	local npcCorner = Instance.new("UICorner")
-	npcCorner.CornerRadius = UDim.new(0, 10)
-	npcCorner.Parent = npcCount
-	
-	coroutine.wrap(function()
-		while true do
-			if CONFIG.enabled then
-				local currentTime = tick()
-				
-				if currentTime - lastNPCFindTime > CONFIG.npcCacheRefreshRate then
-					validNPCsCache = findValidNPCs()
-					lastNPCFindTime = currentTime
-					npcCount.Text = "NPCs: " .. #validNPCsCache
-				end
-				
-				if not burstActive and #validNPCsCache > 0 then
-					burstAttackTarget(validNPCsCache[1])
-				end
-			end
-			
-			wait(CONFIG.npcCacheRefreshRate)
-		end
-	end)()
-end
-
-print("Killaura script loaded" .. (isMobile and " (Mobile)" or ""))
+  if closestTarget then
+   weapon.VerifyHit:FireServer(closestTarget, tick())
+  end
+ end
+end)
