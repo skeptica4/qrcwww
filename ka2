@@ -1,102 +1,121 @@
-local Aura = {
-	Enabled = false,
-}
+local Players, RunService, UserInputService = game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService")
+local LocalPlayer, workspace, tick, wait, task = Players.LocalPlayer, workspace, tick, wait, task
+local isMobile = not UserInputService.KeyboardEnabled
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
+local CONFIG = {enabled = false, attackLoopWaitTime = 0.05, npcCacheRefreshRate = 0.5}
+local EXCLUDED_NPCS = {Landmine=1, Man=1, Turret=1, Stonehedge=1, Sprayer=1, Sentinel=1, Refugee=1, PDC=1, MADS=1, Lifeline=1, Hallucinator=1, Governor=1, FAST_point=1, Barrier=1, Administrator=1}
+for i = 1, 11 do EXCLUDED_NPCS["dead guy " .. i] = 1 end
 
-local EXCLUDED_NAMES = {
-	Landmine=true, Man=true, Turret=true, Stonehedge=true, Sprayer=true, Sentinel=true, Refugee=true, PDC=true,
-	MADS=true, Lifeline=true, Hallucinator=true, Governor=true, FAST_point=true, Barrier=true, Administrator=true,
-	["dead guy 1"]=true, ["dead guy 2"]=true, ["dead guy 3"]=true, ["dead guy 4"]=true, ["dead guy 5"]=true, ["dead guy 6"]=true,
-	["dead guy 7"]=true, ["dead guy 8"]=true, ["dead guy 9"]=true, ["dead guy 10"]=true, ["dead guy 11"]=true
-}
-local NPC_RELATIONSHIPS = {
-	Drone = { protects = "Achilles" }
-}
+local cachedWeapon, validNPCs, lastFindTime = nil, {}, 0
 
-local weaponCache
-local npcCache = {}
-local lastCacheTime = 0
-
-local function findMeleeWeapon()
-	local localPlayer = Players.LocalPlayer
-	local character = localPlayer and localPlayer.Character
-	if not character then return end
-
-	for _, item in ipairs(character:GetChildren()) do
-		if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") and item:FindFirstChild("VerifyHit") then
-			return item
-		end
-	end
+local findValidTargets = function()
+    local char, targets = LocalPlayer.Character, {}
+    if not char then return targets end
+    
+    local children = workspace:GetChildren()
+    for i = 1, #children do
+        local model = children[i]
+        if model:IsA("Model") and not EXCLUDED_NPCS[model.Name] and not Players:GetPlayerFromCharacter(model) then
+            local humanoid = model:FindFirstChildOfClass("Humanoid")
+            if model.Name == "APU" then
+                local pilot = model:FindFirstChild("Pilot")
+                humanoid = pilot and pilot:FindFirstChildOfClass("Humanoid")
+            elseif model.Name == "Platform" then
+                local modelChildren = model:GetChildren()
+                for j = 1, #modelChildren do
+                    local child = modelChildren[j]
+                    if child.Name:match("Emplacement%d") then
+                        local h = child:FindFirstChildOfClass("Humanoid")
+                        if h and h.Health > 0 then targets[#targets + 1] = {model = model, target = h} end
+                    end
+                end
+                if #targets == 0 and humanoid and humanoid.Health > 0 then
+                    targets[#targets + 1] = {model = model, target = humanoid}
+                end
+                humanoid = nil
+            end
+            if humanoid and humanoid.Health > 0 then
+                targets[#targets + 1] = {model = model, target = humanoid, priority = model.Name == "Drone"}
+            end
+        end
+    end
+    table.sort(targets, function(a, b) return (a.priority or false) and not (b.priority or false) end)
+    return targets
 end
 
-local function findValidNPCs()
-	local validNpcs, priorityTargets = {}, {}
-	local workspaceChildren = Workspace:GetChildren()
-
-	for _, model in ipairs(workspaceChildren) do
-		if model:IsA("Model") and not EXCLUDED_NAMES[model.Name] and not Players:GetPlayerFromCharacter(model) then
-			local target = model:FindFirstChildOfClass("Humanoid")
-			if model.Name == "Platform" then
-				local emplacementsAlive = false
-				for _, child in ipairs(model:GetChildren()) do
-					if string.match(child.Name, "Emplacement%d") then
-						local empTarget = child:FindFirstChildOfClass("Humanoid")
-						if empTarget and empTarget.Health > 0 then
-							emplacementsAlive = true
-							table.insert(validNpcs, empTarget)
-						end
-					end
-				end
-				if emplacementsAlive then continue end
-			end
-
-			if target and target.Health > 0 then
-				if NPC_RELATIONSHIPS[model.Name] then
-					table.insert(priorityTargets, target)
-				else
-					table.insert(validNpcs, target)
-				end
-			end
-		end
-	end
-
-	for i = #priorityTargets, 1, -1 do
-		table.insert(validNpcs, 1, priorityTargets[i])
-	end
-	return validNpcs
+local attack = function(npc)
+    if not cachedWeapon or not cachedWeapon.Parent then
+        local char, backpack = LocalPlayer.Character, LocalPlayer:FindFirstChild("Backpack")
+        for _, loc in ipairs({char, backpack}) do
+            if loc then
+                local items = loc:GetChildren()
+                for i = 1, #items do
+                    local item = items[i]
+                    if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") then
+                        local verify = item:FindFirstChild("VerifyHit")
+                        if verify and verify:IsA("RemoteEvent") then cachedWeapon = item; break end
+                    end
+                end
+            end
+            if cachedWeapon then break end
+        end
+    end
+    
+    if cachedWeapon and npc.target and npc.target.Parent then
+        local verify = cachedWeapon:FindFirstChild("VerifyHit")
+        if verify then verify:FireServer(npc.target, ("%04x%04x-%04x-%04x-%04x-%04x%08x"):format(
+            math.random(0, 0xffff), math.random(0, 0xffff), math.random(0, 0xffff),
+            bit32.bor(0x4000, math.random(0, 0x0fff)), bit32.bor(0x8000, math.random(0, 0x3fff)),
+            math.random(0, 0xffff), math.random(0, 0xffffffff))) end
+    end
 end
 
-local function attack(target)
-	weaponCache = weaponCache and weaponCache.Parent and weaponCache or findMeleeWeapon()
-	if not weaponCache or not target or not target.Parent or target.Health <= 0 then return end
-
-	local verifyHit = weaponCache:FindFirstChild("VerifyHit")
-	if verifyHit then
-		verifyHit:FireServer(
-			target,
-			("x"):rep(8):gsub("x", function() return ("%x"):format(math.random(0, 0xf)) end)
-		)
-	end
-end
-
-RunService.Heartbeat:Connect(function()
-	if not Aura.Enabled then return end
-
-	local currentTime = tick()
-	if (currentTime - lastCacheTime) > 0.5 then
-		lastCacheTime = currentTime
-		npcCache = findValidNPCs()
-	end
-
-	for _, target in ipairs(npcCache) do
-		task.spawn(
-			attack,
-			target
-		)
-	end
+-- Main loop
+task.spawn(function()
+    while true do
+        if CONFIG.enabled then
+            local currentTime = tick()
+            if currentTime - lastFindTime > CONFIG.npcCacheRefreshRate then
+                validNPCs = findValidTargets()
+                lastFindTime = currentTime
+                if isMobile and _G.npcCountLabel then _G.npcCountLabel.Text = "NPCs: " .. #validNPCs end
+            end
+            for i = 1, #validNPCs do task.spawn(attack, validNPCs[i]) end
+        end
+        wait(CONFIG.attackLoopWaitTime)
+    end
 end)
 
-return Aura
+-- UI Setup
+if isMobile then
+    local gui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+    gui.Name, gui.ResetOnSpawn = "KillauraUI", false
+    
+    local btn = Instance.new("TextButton", gui)
+    btn.Size, btn.Position = UDim2.fromOffset(100, 100), UDim2.fromOffset(10, 290)
+    btn.BackgroundColor3, btn.Text, btn.TextColor3 = Color3.fromRGB(200, 50, 50), "KILL\nOFF", Color3.new(1, 1, 1)
+    btn.Font, btn.TextSize, btn.BorderSizePixel = Enum.Font.GothamBold, 14, 0
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+    
+    local lbl = Instance.new("TextLabel", gui)
+    lbl.Size, lbl.Position = UDim2.fromOffset(100, 50), UDim2.fromOffset(10, 400)
+    lbl.BackgroundColor3, lbl.Text, lbl.TextColor3 = Color3.fromRGB(30, 30, 30), "NPCs: 0", Color3.new(1, 1, 1)
+    lbl.Font, lbl.TextSize, lbl.BackgroundTransparency = Enum.Font.Gotham, 12, 0.3
+    Instance.new("UICorner", lbl).CornerRadius = UDim.new(0, 10)
+    _G.npcCountLabel = lbl
+    
+    btn.Activated:Connect(function()
+        CONFIG.enabled = not CONFIG.enabled
+        btn.Text = CONFIG.enabled and "KILL\nON" or "KILL\nOFF"
+        btn.BackgroundColor3 = CONFIG.enabled and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(200, 50, 50)
+    end)
+else
+    UserInputService.InputBegan:Connect(function(input, proc)
+        if not proc and input.KeyCode == Enum.KeyCode.Z then
+            CONFIG.enabled = not CONFIG.enabled
+            print("Killaura", CONFIG.enabled and "Enabled" or "Disabled")
+        end
+    end)
+end
+
+print("Killaura loaded" .. (isMobile and " (Mobile)" or ""))
