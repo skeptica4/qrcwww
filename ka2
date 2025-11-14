@@ -1,60 +1,82 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local plr = Players.LocalPlayer
+
+local enabled = false
+local weaponCache = nil
+
+local EXCLUDED = {
+	Landmine=true, Man=true, Turret=true, Stonehedge=true, Sprayer=true, Sentinel=true,
+	Refugee=true, PDC=true, MADS=true, Lifeline=true, Hallucinator=true, Governor=true,
+	FAST_point=true, Barrier=true, Administrator=true, ["dead guy 1"]=true, ["dead guy 2"]=true,
+	["dead guy 3"]=true, ["dead guy 4"]=true, ["dead guy 5"]=true, ["dead guy 6"]=true,
+	["dead guy 7"]=true, ["dead guy 8"]=true, ["dead guy 9"]=true, ["dead guy 10"]=true, ["dead guy 11"]=true,
+}
+
+local function attack(target)
+	if not weaponCache or not weaponCache.Parent then
+		local char = plr.Character
+		local pack = plr.Backpack
+		if not char or not pack then return end
+
+		for _, item in ipairs({char:GetChildren(), pack:GetChildren()}) do
+			if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") then
+				weaponCache = item
+				break
+			end
+		end
+		if not weaponCache then return end
+	end
+	
+	pcall(weaponCache.VerifyHit.FireServer, weaponCache.VerifyHit, target, math.random())
+end
+
+local function getTarget(model)
+	if model.Name == "APU" then return model.Pilot and model.Pilot:FindFirstChildOfClass("Humanoid") end
+	if model.Name == "Tank" then return model.PropaneTank and model.PropaneTank:FindFirstChildOfClass("Humanoid") end
+	if model.Name == "Platform" then
+		for _, child in ipairs(model:GetChildren()) do
+			if child.Name:match("Emplacement") then
+				local hum = child:FindFirstChildOfClass("Humanoid")
+				if hum and hum.Health > 0 then return hum end
+			end
+		end
+	end
+	return model:FindFirstChildOfClass("Humanoid")
+end
+
+if not UserInputService.KeyboardEnabled then -- Mobile UI
+	local gui = Instance.new("ScreenGui", plr.PlayerGui)
+	local btn = Instance.new("TextButton", gui)
+	btn.Size = UDim2.fromOffset(100, 100)
+	btn.Position = UDim2.fromOffset(10, 290)
+	btn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+	btn.Text = "KILL\nOFF"
+	btn.Font = Enum.Font.GothamBold
+	btn.TextColor3 = Color3.new(1,1,1)
+	btn.Activated:Connect(function()
+		enabled = not enabled
+		btn.Text = enabled and "KILL\nON" or "KILL\nOFF"
+		btn.BackgroundColor3 = enabled and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(200, 50, 50)
+	end)
+else -- Desktop Keybind
+	UserInputService.InputBegan:Connect(function(input, gp)
+		if not gp and input.KeyCode == Enum.KeyCode.Z then enabled = not enabled end
+	end)
+end
+
 task.spawn(function()
- local Players = game:GetService("Players")
- local RunService = game:GetService("RunService")
- local UserInputService = game:GetService("UserInputService")
- local LocalPlayer = Players.LocalPlayer
- local enabled = false
- local attackRange = 100
- local loopDelay = 0.05
-
- local function getMeleeWeapon()
-  local char = LocalPlayer.Character
-  if not char then return nil end
-
-  for _, container in {char, LocalPlayer.Backpack} do
-   if not container then continue end
-   for _, item in ipairs(container:GetChildren()) do
-    if item:IsA("Tool") and item:FindFirstChild("VerifyHit") then
-     return item
-    end
-   end
-  end
-  return nil
- end
-
- UserInputService.InputBegan:Connect(function(input, gp)
-  if not gp and input.KeyCode == Enum.KeyCode.Z then
-   enabled = not enabled
-  end
- end)
-
- while true do
-  task.wait(loopDelay)
-  if not enabled then continue end
-
-  local char = LocalPlayer.Character
-  local root = char and char:FindFirstChild("HumanoidRootPart")
-  if not root then continue end
-
-  local weapon = getMeleeWeapon()
-  if not weapon then continue end
-
-  local closestTarget, minDist = nil, attackRange
-  for _, model in ipairs(workspace:GetChildren()) do
-   local hum = model:FindFirstChildOfClass("Humanoid")
-   local hrp = model:FindFirstChild("HumanoidRootPart")
-
-   if hum and hrp and hum.Health > 0 and model ~= char and not Players:GetPlayerFromCharacter(model) then
-    local dist = (root.Position - hrp.Position).Magnitude
-    if dist < minDist then
-     minDist = dist
-     closestTarget = hum
-    end
-   end
-  end
-
-  if closestTarget then
-   weapon.VerifyHit:FireServer(closestTarget, tick())
-  end
- end
+	while task.wait(0.05) do
+		if not enabled then continue end
+		
+		for _, model in ipairs(workspace:GetChildren()) do
+			if model:IsA("Model") and not EXCLUDED[model.Name] and not Players:GetPlayerFromCharacter(model) then
+				local target = getTarget(model)
+				if target and target.Health > 0 then
+					task.spawn(attack, target)
+				end
+			end
+		end
+	end
 end)
