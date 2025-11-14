@@ -1,66 +1,64 @@
+_G.killaura = { enabled = true }
+
 local Players = game:GetService("Players")
-local plr = Players.LocalPlayer
-local weaponCache = nil
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
 
-local EXCLUDED = {
-	Landmine=true, Man=true, Turret=true, Stonehedge=true, Sprayer=true, Sentinel=true,
-	Refugee=true, PDC=true, MADS=true, Lifeline=true, Hallucinator=true, Governor=true,
-	FAST_point=true, Barrier=true, Administrator=true, ["dead guy 1"]=true, ["dead guy 2"]=true,
-	["dead guy 3"]=true, ["dead guy 4"]=true, ["dead guy 5"]=true, ["dead guy 6"]=true,
-	["dead guy 7"]=true, ["dead guy 8"]=true, ["dead guy 9"]=true, ["dead guy 10"]=true, ["dead guy 11"]=true,
-}
+local EXCLUDED = {["Landmine"]=true,["Man"]=true,["Turret"]=true,["Stonehedge"]=true,["Sprayer"]=true,["Sentinel"]=true,["Refugee"]=true,["PDC"]=true,["MADS"]=true,["Lifeline"]=true,["Hallucinator"]=true,["Governor"]=true,["FAST_point"]=true,["Barrier"]=true,["Administrator"]=true}
+for i=1,11 do EXCLUDED["dead guy "..i]=true end
 
-local function attack(target)
-	if not weaponCache or not weaponCache.Parent then
-		weaponCache = nil
-		local char = plr.Character
-		if not char then return end
+local weapon, lastScan, uuid = nil, 0, 0
 
-		-- Check character first
-		for _, item in ipairs(char:GetChildren()) do
-			if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") then
-				weaponCache = item; break
-			end
-		end
-
-		-- Then check backpack if nothing was equipped
-		if not weaponCache then
-			for _, item in ipairs(plr.Backpack:GetChildren()) do
-				if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") then
-					weaponCache = item; break
-				end
-			end
-		end
-		
-		if not weaponCache then return end
-	end
+local function findWeapon()
+	local char = LocalPlayer.Character
+	if not char then return end
 	
-	pcall(weaponCache.VerifyHit.FireServer, weaponCache.VerifyHit, target, math.random())
+	for _, item in ipairs(char:GetChildren()) do
+		if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") and item:FindFirstChild("VerifyHit") then return item end
+	end
+	for _, item in ipairs(LocalPlayer.Backpack:GetChildren()) do
+		if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") and item:FindFirstChild("VerifyHit") then return item end
+	end
 end
 
-local function getTarget(model)
-	if model.Name == "APU" then return model.Pilot and model.Pilot:FindFirstChildOfClass("Humanoid") end
-	if model.Name == "Tank" then return model.PropaneTank and model.PropaneTank:FindFirstChildOfClass("Humanoid") end
-	if model.Name == "Platform" then
-		for _, child in ipairs(model:GetChildren()) do
-			if child.Name:match("Emplacement") then
-				local hum = child:FindFirstChildOfClass("Humanoid")
-				if hum and hum.Health > 0 then return hum end
+RunService.Heartbeat:Connect(function()
+	if not _G.killaura.enabled then return end
+	
+	local now = tick()
+	if now - lastScan < 0.25 then return end
+	lastScan = now
+
+	if not weapon or not weapon.Parent then weapon = findWeapon() end
+	if not weapon or not LocalPlayer.Character then return end
+	
+	local verifyHit = weapon.VerifyHit
+	local targets, priority = {}, {}
+
+	for _, model in ipairs(workspace:GetChildren()) do
+		if model:IsA("Model") and model ~= LocalPlayer.Character and not EXCLUDED[model.Name] then
+			local hum = model:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				if model.Name == "Drone" then table.insert(priority, hum) else table.insert(targets, hum) end
+			elseif model.Name == "Platform" then
+				local hasLive = false
+				for _, child in ipairs(model:GetChildren()) do
+					if string.match(child.Name, "Emplacement%d") then
+						local emp = child:FindFirstChildOfClass("Humanoid")
+						if emp and emp.Health > 0 then hasLive, _ = table.insert(targets, emp), true end
+					end
+				end
+				if not hasLive and hum and hum.Health > 0 then table.insert(targets, hum) end
+			elseif model.Name == "APU" then
+				local pilot = model:FindFirstChild("Pilot")
+				local pilotHum = pilot and pilot:FindFirstChildOfClass("Humanoid")
+				if pilotHum and pilotHum.Health > 0 then table.insert(targets, pilotHum) end
 			end
 		end
 	end
-	return model:FindFirstChildOfClass("Humanoid")
-end
 
-task.spawn(function()
-	while task.wait(0.05) do
-		for _, model in ipairs(workspace:GetChildren()) do
-			if model:IsA("Model") and not EXCLUDED[model.Name] and not Players:GetPlayerFromCharacter(model) then
-				local target = getTarget(model)
-				if target and target.Health > 0 then
-					task.spawn(attack, target)
-				end
-			end
-		end
+	table.move(targets, 1, #targets, #priority + 1, priority)
+	for i = 1, #priority do
+		uuid += 1
+		task.spawn(verifyHit.FireServer, verifyHit, priority[i], "v-"..uuid)
 	end
 end)
