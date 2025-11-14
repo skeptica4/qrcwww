@@ -12,14 +12,26 @@ local EXCLUDED = {
 
 local function attack(target)
 	if not weaponCache or not weaponCache.Parent then
+		weaponCache = nil
 		local char = plr.Character
 		if not char then return end
-		
-		for _, item in ipairs({char:GetChildren(), plr.Backpack:GetChildren()}) do
+
+		-- Check character first
+		for _, item in ipairs(char:GetChildren()) do
 			if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") then
 				weaponCache = item; break
 			end
 		end
+
+		-- Then check backpack if nothing was equipped
+		if not weaponCache then
+			for _, item in ipairs(plr.Backpack:GetChildren()) do
+				if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") then
+					weaponCache = item; break
+				end
+			end
+		end
+		
 		if not weaponCache then return end
 	end
 	
