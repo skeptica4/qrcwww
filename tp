@@ -48,6 +48,47 @@ local function getCurrentWeapon()
     return nil, nil
 end
 
+-- Handle Platform special logic
+local function handlePlatform(platform, targets)
+    local livingEmplacements = {}
+    local allEmplacementsDead = true
+    
+    -- Step 1: Check ALL Emplacements
+    for _, child in ipairs(platform:GetChildren()) do
+        if child.Name:match("Emplacement%d") then  -- Matches Emplacement1, Emplacement2, etc.
+            local humanoid = child:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                if humanoid.Health > 0 then
+                    allEmplacementsDead = false
+                    table.insert(livingEmplacements, {
+                        humanoid = humanoid,
+                        model = child,
+                        parent = platform
+                    })
+                end
+            end
+        end
+    end
+    
+    -- Step 2: Decide what to target
+    if not allEmplacementsDead then
+        -- If ANY Emplacement is alive, add ALL living Emplacements
+        for _, emplacement in ipairs(livingEmplacements) do
+            table.insert(targets, emplacement)
+        end
+    else
+        -- If ALL Emplacements are dead, target main Platform humanoid
+        local platformHumanoid = platform:FindFirstChildOfClass("Humanoid")
+        if platformHumanoid and platformHumanoid.Health > 0 then
+            table.insert(targets, {
+                humanoid = platformHumanoid,
+                model = platform,
+                parent = platform
+            })
+        end
+    end
+end
+
 -- Find all valid targets in workspace
 local function findTargets()
     local targets = {}
@@ -60,9 +101,8 @@ local function findTargets()
         -- Skip excluded and player characters
         if obj:IsA("Model") and not EXCLUDED[obj.Name] and not Players:GetPlayerFromCharacter(obj) then
             
-            -- Handle Tank models specially
+            -- Handle Tank models - look for PropaneTank children
             if obj.Name == "Tank" then
-                -- Look for all PropaneTank children
                 for _, child in ipairs(obj:GetChildren()) do
                     if child.Name == "PropaneTank" then
                         local humanoid = child:FindFirstChildOfClass("Humanoid")
@@ -76,6 +116,10 @@ local function findTargets()
                     end
                 end
                 
+            -- Handle Platform with special conditional logic
+            elseif obj.Name == "Platform" then
+                handlePlatform(obj, targets)
+                
             -- Handle APU models
             elseif obj.Name == "APU" then
                 local pilot = obj:FindFirstChild("Pilot")
@@ -87,21 +131,6 @@ local function findTargets()
                             model = pilot,
                             parent = obj
                         })
-                    end
-                end
-                
-            -- Handle Platform models
-            elseif obj.Name == "Platform" then
-                for _, child in ipairs(obj:GetChildren()) do
-                    if child.Name:match("Emplacement%d") then
-                        local humanoid = child:FindFirstChildOfClass("Humanoid")
-                        if humanoid and humanoid.Health > 0 then
-                            table.insert(targets, {
-                                humanoid = humanoid, 
-                                model = child,
-                                parent = obj
-                            })
-                        end
                     end
                 end
                 
@@ -124,7 +153,6 @@ end
 
 -- Kill a target
 local function killTarget(target, weapon, remote)
-    -- Avoid duplicate shooting
     if shooting[target.humanoid] then return end
     shooting[target.humanoid] = true
     
@@ -135,7 +163,7 @@ local function killTarget(target, weapon, remote)
             return
         end
         
-        -- Get body parts to shoot at (look in the model that contains the humanoid)
+        -- Get parts to shoot at
         local parts = {}
         for _, part in ipairs(target.model:GetDescendants()) do
             if part:IsA("BasePart") and #parts < 5 then
@@ -143,7 +171,6 @@ local function killTarget(target, weapon, remote)
             end
         end
         
-        -- If no parts in model, check parent
         if #parts == 0 and target.parent then
             for _, part in ipairs(target.parent:GetDescendants()) do
                 if part:IsA("BasePart") and #parts < 5 then
@@ -152,7 +179,6 @@ local function killTarget(target, weapon, remote)
             end
         end
         
-        -- Default fallback
         if #parts == 0 then
             parts = {{Position = target.model:GetPivot().Position}}
         end
