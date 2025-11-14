@@ -4,7 +4,7 @@ local LocalPlayer = Players.LocalPlayer
 
 -- Configuration
 local CONFIG = {
-    enabled = false,
+    enabled = true,
     fireRate = 0.005,  -- Faster fire rate for guns
     burstCount = 100,  -- More hits since it's ranged
     maxRange = 500,
