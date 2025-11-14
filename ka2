@@ -1,13 +1,6 @@
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local plr = Players.LocalPlayer
 local weaponCache = nil
-
--- If the Noobs folder exists, move it to the workspace so it's visible
-local noobsFolder = ReplicatedStorage.Units:FindFirstChild("Noobs")
-if noobsFolder then
-	noobsFolder.Parent = workspace
-end
 
 local EXCLUDED = {
 	Landmine=true, Man=true, Turret=true, Stonehedge=true, Sprayer=true, Sentinel=true,
@@ -36,16 +29,16 @@ local function attack(target)
 				end
 			end
 		end
-
+		
 		if not weaponCache then return end
 	end
-
+	
 	pcall(weaponCache.VerifyHit.FireServer, weaponCache.VerifyHit, target, math.random())
 end
 
 local function getTarget(model)
 	if model.Name == "APU" then return model.Pilot and model.Pilot:FindFirstChildOfClass("Humanoid") end
-
+	
 	if model.Name == "Tank" then
 		for _, child in ipairs(model:GetChildren()) do
 			if child.Name == "PropaneTank" then
@@ -66,21 +59,29 @@ local function getTarget(model)
 	return model:FindFirstChildOfClass("Humanoid")
 end
 
-local function scanAndAttack(folder)
-    if not folder then return end
-	for _, model in ipairs(folder:GetChildren()) do
-		if model:IsA("Model") and not EXCLUDED[model.Name] and not Players:GetPlayerFromCharacter(model) then
-			local target = getTarget(model)
-			if target and target.Health > 0 then
-				task.spawn(attack, target)
-			end
-		end
-	end
-end
-
 task.spawn(function()
 	while task.wait(0.05) do
-		scanAndAttack(workspace)
-        scanAndAttack(workspace:FindFirstChild("Noobs"))
+		-- Main workspace loop
+		for _, model in ipairs(workspace:GetChildren()) do
+			if model:IsA("Model") and not EXCLUDED[model.Name] and not Players:GetPlayerFromCharacter(model) then
+				local target = getTarget(model)
+				if target and target.Health > 0 then
+					task.spawn(attack, target)
+				end
+			end
+		end
+
+		-- Specific folder loop for "Noobs"
+		local noobsFolder = workspace:FindFirstChild("Noobs")
+		if noobsFolder then
+			for _, model in ipairs(noobsFolder:GetChildren()) do
+				if model:IsA("Model") then
+					local target = getTarget(model)
+					if target and target.Health > 0 then
+						task.spawn(attack, target)
+					end
+				end
+			end
+		end
 	end
 end)
