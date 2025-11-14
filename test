@@ -1,0 +1,272 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Configuration
+local CONFIG = {
+    enabled = false,
+    fireRate = 0.005,  -- Faster fire rate for guns
+    burstCount = 100,  -- More hits since it's ranged
+    maxRange = 500,
+    trackingSpeed = 0.1,
+    hitSpread = 0.5,  -- Randomization for hit positions
+    weaponList = {
+        "Akimbo", "Voltaic Impact", "Gunslingers", "Burst Rifle", "Stonewall",
+        "Steelforge", "DMR", "Gift of Fire", "Armour Peeler", "Medical Bow",
+        "Recurve", "Vitabow", "Rifle", "Bolter", "Harpoon Gun", "RPG",
+        "Rocket Stormer", "Shockwave Device", "Shotgun", "Hallsweeper",
+        "Sprinter's Streak", "SMG", "Loose Trigger", "Twinface",
+        "Mastermind's Rifle", "Shovel", "Overcharger", "Rallying Cry",
+        "Machete", "Handaxes", "Torqueblade"
+    }
+}
+
+-- Excluded NPCs
+local EXCLUDED_NPCS = {
+    Landmine=1, Man=1, Turret=1, Stonehedge=1, Sprayer=1, 
+    Sentinel=1, Refugee=1, PDC=1, MADS=1, Lifeline=1, 
+    Hallucinator=1, Governor=1, FAST_point=1, Barrier=1, 
+    Administrator=1
+}
+for i = 1, 11 do EXCLUDED_NPCS["dead guy " .. i] = 1 end
+
+-- State tracking
+local currentWeapon = nil
+local activeTargets = {}
+local weaponCache = {}
+
+-- Helper function to get target's body parts
+local function getTargetParts(model)
+    local parts = {}
+    
+    -- Priority order for hit locations
+    local partNames = {"Head", "Torso", "UpperTorso", "LowerTorso", "HumanoidRootPart", 
+                      "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
+    
+    for _, partName in ipairs(partNames) do
+        local part = model:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            table.insert(parts, part)
+        end
+    end
+    
+    -- If no specific parts found, get all BaseParts
+    if #parts == 0 then
+        for _, child in ipairs(model:GetDescendants()) do
+            if child:IsA("BasePart") and child.CanCollide then
+                table.insert(parts, child)
+                if #parts >= 5 then break end  -- Limit to 5 parts
+            end
+        end
+    end
+    
+    return parts
+end
+
+-- Find weapons from our list
+local function findWeapons()
+    weaponCache = {}
+    local char = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    
+    for _, location in ipairs({char, backpack}) do
+        if location then
+            for _, tool in ipairs(location:GetChildren()) do
+                if tool:IsA("Tool") then
+                    for _, weaponName in ipairs(CONFIG.weaponList) do
+                        if tool.Name == weaponName then
+                            local verifyHit = tool:FindFirstChild("VerifyHit")
+                            if verifyHit and verifyHit:IsA("RemoteEvent") then
+                                weaponCache[tool] = verifyHit
+                                if not currentWeapon then
+                                    currentWeapon = tool
+                                end
+                            end
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return weaponCache
+end
+
+-- Get valid targets
+local function getTargets()
+    local targets = {}
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then 
+        return targets 
+    end
+    
+    local myPos = char.HumanoidRootPart.Position
+    
+    for _, model in ipairs(workspace:GetChildren()) do
+        if model:IsA("Model") and not EXCLUDED_NPCS[model.Name] 
+           and not Players:GetPlayerFromCharacter(model) then
+            
+            local humanoid = model:FindFirstChildOfClass("Humanoid")
+            
+            -- Special cases
+            if model.Name == "APU" then
+                local pilot = model:FindFirstChild("Pilot")
+                humanoid = pilot and pilot:FindFirstChildOfClass("Humanoid")
+            elseif model.Name == "Platform" then
+                for _, child in ipairs(model:GetChildren()) do
+                    if child.Name:match("Emplacement%d") then
+                        local h = child:FindFirstChildOfClass("Humanoid")
+                        if h and h.Health > 0 then
+                            local parts = getTargetParts(child)
+                            if #parts > 0 then
+                                targets[#targets + 1] = {
+                                    humanoid = h,
+                                    model = child,
+                                    parts = parts,
+                                    distance = (child:GetPivot().Position - myPos).Magnitude
+                                }
+                            end
+                        end
+                    end
+                end
+            end
+            
+            if humanoid and humanoid.Health > 0 then
+                local parts = getTargetParts(model)
+                if #parts > 0 then
+                    local distance = (parts[1].Position - myPos).Magnitude
+                    
+                    if distance <= CONFIG.maxRange then
+                        targets[#targets + 1] = {
+                            humanoid = humanoid,
+                            model = model,
+                            parts = parts,
+                            distance = distance,
+                            priority = model.Name == "Drone"
+                        }
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Sort by priority then distance
+    table.sort(targets, function(a, b)
+        if a.priority and not b.priority then return true end
+        if not a.priority and b.priority then return false end
+        return a.distance < b.distance
+    end)
+    
+    return targets
+end
+
+-- Fire at target with correct arguments
+local function fireAtTarget(target)
+    if not currentWeapon or not weaponCache[currentWeapon] then
+        findWeapons()
+        if not currentWeapon then return false end
+    end
+    
+    local verifyHit = weaponCache[currentWeapon]
+    if not verifyHit then return false end
+    
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then 
+        return false 
+    end
+    
+    -- Track this target
+    if not activeTargets[target.humanoid] then
+        activeTargets[target.humanoid] = true
+        
+        task.spawn(function()
+            local hitCount = 0
+            local partIndex = 1
+            
+            -- Fire continuously until dead
+            while target.humanoid.Parent and target.humanoid.Health > 0 
+                  and CONFIG.enabled and hitCount < CONFIG.burstCount do
+                
+                hitCount = hitCount + 1
+                
+                -- Get shooter position (our position)
+                local shooterPos = char.HumanoidRootPart.Position
+                
+                -- Cycle through body parts for varied hits
+                local targetPart = target.parts[partIndex]
+                if targetPart and targetPart.Parent then
+                    -- Calculate hit position with spread
+                    local hitPos = targetPart.Position + Vector3.new(
+                        math.random() * CONFIG.hitSpread - CONFIG.hitSpread/2,
+                        math.random() * CONFIG.hitSpread - CONFIG.hitSpread/2,
+                        math.random() * CONFIG.hitSpread - CONFIG.hitSpread/2
+                    )
+                    
+                    -- Add slight variation to shooter position for realism
+                    local variedShooterPos = shooterPos + Vector3.new(
+                        math.random() * 0.1 - 0.05,
+                        0,
+                        math.random() * 0.1 - 0.05
+                    )
+                    
+                    -- Fire with correct arguments: (Humanoid, HitPosition, ShooterPosition)
+                    pcall(function()
+                        verifyHit:FireServer(
+                            target.humanoid,
+                            hitPos,  -- Where the bullet hit on target
+                            variedShooterPos  -- Where we shot from
+                        )
+                    end)
+                    
+                    -- Cycle to next body part
+                    partIndex = partIndex % #target.parts + 1
+                end
+                
+                task.wait(CONFIG.fireRate)
+            end
+            
+            activeTargets[target.humanoid] = nil
+        end)
+        
+        return true
+    end
+    
+    return false
+end
+
+-- Main loop
+local function startAutoFire()
+    task.spawn(function()
+        while true do
+            if CONFIG.enabled then
+                -- Refresh weapon cache
+                if not currentWeapon or not currentWeapon.Parent then
+                    findWeapons()
+                end
+                
+                -- Get and engage targets
+                local targets = getTargets()
+                
+                for _, target in ipairs(targets) do
+                    if not CONFIG.enabled then break end
+                    
+                    if not activeTargets[target.humanoid] then
+                        fireAtTarget(target)
+                        task.wait(0.02)  -- Small delay between new targets
+                    end
+                end
+                
+                -- Cleanup dead targets
+                for humanoid, _ in pairs(activeTargets) do
+                    if not humanoid.Parent or humanoid.Health <= 0 then
+                        activeTargets[humanoid] = nil
+                    end
+                end
+            else
+                activeTargets = {}
+            end
+            
+            task.wait(CONFIG.trackingSpeed)
+        end
+    end)
+end
