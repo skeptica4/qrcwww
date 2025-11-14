@@ -1,0 +1,51 @@
+-- Aggressive teleporting for multiple angles
+local function aggressiveTeleport()
+    while true do
+        local targets = findTargets()
+        
+        for _, target in ipairs(targets) do
+            if target.humanoid.Parent and target.humanoid.Health > 0 then
+                local char = LocalPlayer.Character
+                if not char or not char:FindFirstChild("HumanoidRootPart") then
+                    task.wait(0.1)
+                    continue
+                end
+                
+                -- Teleport to multiple positions rapidly
+                local positions = {
+                    -- Behind
+                    target.model:GetPivot() * CFrame.new(0, HEIGHT_OFFSET, TELEPORT_DISTANCE),
+                    -- Front
+                    target.model:GetPivot() * CFrame.new(0, HEIGHT_OFFSET, -TELEPORT_DISTANCE),
+                    -- Left
+                    target.model:GetPivot() * CFrame.new(-TELEPORT_DISTANCE, HEIGHT_OFFSET, 0),
+                    -- Right
+                    target.model:GetPivot() * CFrame.new(TELEPORT_DISTANCE, HEIGHT_OFFSET, 0),
+                    -- Above
+                    target.model:GetPivot() * CFrame.new(0, TELEPORT_DISTANCE, 0),
+                }
+                
+                -- Cycle through positions quickly
+                for _, cf in ipairs(positions) do
+                    char.HumanoidRootPart.CFrame = cf
+                    task.wait(0.05)  -- Quick repositioning
+                    
+                    -- Check if target died
+                    if not target.humanoid.Parent or target.humanoid.Health <= 0 then
+                        break
+                    end
+                end
+                
+                -- Move to next target if this one died
+                if not target.humanoid.Parent or target.humanoid.Health <= 0 then
+                    task.wait(0.1)
+                end
+            end
+        end
+        
+        task.wait(0.1)
+    end
+end
+
+-- Uncomment to use aggressive mode instead
+-- aggressiveTeleport()
