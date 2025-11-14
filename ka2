@@ -1,9 +1,5 @@
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local plr = Players.LocalPlayer
-
-local enabled = false
 local weaponCache = nil
 
 local EXCLUDED = {
@@ -17,13 +13,11 @@ local EXCLUDED = {
 local function attack(target)
 	if not weaponCache or not weaponCache.Parent then
 		local char = plr.Character
-		local pack = plr.Backpack
-		if not char or not pack then return end
-
-		for _, item in ipairs({char:GetChildren(), pack:GetChildren()}) do
+		if not char then return end
+		
+		for _, item in ipairs({char:GetChildren(), plr.Backpack:GetChildren()}) do
 			if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") then
-				weaponCache = item
-				break
+				weaponCache = item; break
 			end
 		end
 		if not weaponCache then return end
@@ -46,30 +40,8 @@ local function getTarget(model)
 	return model:FindFirstChildOfClass("Humanoid")
 end
 
-if not UserInputService.KeyboardEnabled then -- Mobile UI
-	local gui = Instance.new("ScreenGui", plr.PlayerGui)
-	local btn = Instance.new("TextButton", gui)
-	btn.Size = UDim2.fromOffset(100, 100)
-	btn.Position = UDim2.fromOffset(10, 290)
-	btn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-	btn.Text = "KILL\nOFF"
-	btn.Font = Enum.Font.GothamBold
-	btn.TextColor3 = Color3.new(1,1,1)
-	btn.Activated:Connect(function()
-		enabled = not enabled
-		btn.Text = enabled and "KILL\nON" or "KILL\nOFF"
-		btn.BackgroundColor3 = enabled and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(200, 50, 50)
-	end)
-else -- Desktop Keybind
-	UserInputService.InputBegan:Connect(function(input, gp)
-		if not gp and input.KeyCode == Enum.KeyCode.Z then enabled = not enabled end
-	end)
-end
-
 task.spawn(function()
 	while task.wait(0.05) do
-		if not enabled then continue end
-		
 		for _, model in ipairs(workspace:GetChildren()) do
 			if model:IsA("Model") and not EXCLUDED[model.Name] and not Players:GetPlayerFromCharacter(model) then
 				local target = getTarget(model)
