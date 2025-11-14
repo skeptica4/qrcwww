@@ -16,12 +16,14 @@ local function attack(target)
 		local char = plr.Character
 		if not char then return end
 
+		-- Check character first
 		for _, item in ipairs(char:GetChildren()) do
 			if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") then
 				weaponCache = item; break
 			end
 		end
 
+		-- Then check backpack if nothing was equipped
 		if not weaponCache then
 			for _, item in ipairs(plr.Backpack:GetChildren()) do
 				if item:IsA("Tool") and (item:GetAttribute("Class") == "Melee" or item.Name == "Shovel") then
@@ -38,16 +40,7 @@ end
 
 local function getTarget(model)
 	if model.Name == "APU" then return model.Pilot and model.Pilot:FindFirstChildOfClass("Humanoid") end
-	
-	if model.Name == "Tank" then
-		for _, child in ipairs(model:GetChildren()) do
-			if child.Name == "PropaneTank" then
-				local hum = child:FindFirstChildOfClass("Humanoid")
-				if hum and hum.Health > 0 then return hum end
-			end
-		end
-	end
-
+	if model.Name == "Tank" then return model.PropaneTank and model.PropaneTank:FindFirstChildOfClass("Humanoid") end
 	if model.Name == "Platform" then
 		for _, child in ipairs(model:GetChildren()) do
 			if child.Name:match("Emplacement") then
