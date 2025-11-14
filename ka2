@@ -37,7 +37,15 @@ local function attack(target)
 end
 
 local function getTarget(model)
-	if model.Name == "APU" then return model.Pilot and model.Pilot:FindFirstChildOfClass("Humanoid") end
+	if model.Name == "APU" then
+		-- Handle old structure (Humanoid inside a "Pilot" part)
+		local pilot = model:FindFirstChild("Pilot")
+		if pilot then
+			local hum = pilot:FindFirstChildOfClass("Humanoid")
+			if hum then return hum end
+		end
+		-- If old structure not found, fall through to generic check for new structure
+	end
 	
 	if model.Name == "Tank" then
 		for _, child in ipairs(model:GetChildren()) do
@@ -56,6 +64,8 @@ local function getTarget(model)
 			end
 		end
 	end
+	
+	-- Generic fallback (also handles the new APU structure)
 	return model:FindFirstChildOfClass("Humanoid")
 end
 
