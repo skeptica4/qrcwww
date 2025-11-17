@@ -1,7 +1,7 @@
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- Configuration (kept from original)
+-- Configuration
 local VALID_WEAPONS = {"Akimbo", "Voltaic Impact", "Gunslingers", "Burst Rifle", "Stonewall", "Steelforge", "DMR", "Gift of Fire", "Armour Peeler", "Medical Bow", "Recurve", "Vitabow", "Rifle", "Bolter", "Harpoon Gun", "RPG", "Rocket Stormer", "Shockwave Device", "Shotgun", "Hallsweeper", "Sprinter's Streak", "SMG", "Loose Trigger", "Twinface", "Mastermind's Rifle", "Shovel", "Overcharger", "Rallying Cry", "Machete", "Handaxes", "Torqueblade"}
 local EXCLUDED = {Landmine=1, Man=1, Turret=1, Stonehedge=1, Sprayer=1, Sentinel=1, Refugee=1, PDC=1, MADS=1, Lifeline=1, Hallucinator=1, Governor=1, FAST_point=1, Barrier=1, Administrator=1}
 for i = 1, 11 do EXCLUDED["dead guy " .. i] = 1 end
@@ -11,7 +11,7 @@ for _, name in ipairs(VALID_WEAPONS) do weaponLookup[name] = true end
 
 local shooting = {}
 
--- Get current held weapon (efficiently finds first valid tool)
+-- Get current held weapon
 local function getCurrentWeapon()
     local char = LocalPlayer.Character
     if not char then return nil end
@@ -20,13 +20,13 @@ local function getCurrentWeapon()
         if tool:IsA("Tool") and weaponLookup[tool.Name] then
             local verifyHit = tool:FindFirstChild("VerifyHit")
             if verifyHit and verifyHit:IsA("RemoteEvent") then
-                return tool, verifyHit
+                return verifyHit
             end
         end
     end
 end
 
--- Find all valid targets in workspace (more direct and minimal)
+-- Find all valid targets
 local function findTargets()
     local targets = {}
     if not LocalPlayer.Character then return targets end
@@ -76,34 +76,25 @@ local function findTargets()
     return targets
 end
 
--- Kill a target, spoofing position for ranged weapons
+-- Kill a target using the "Self-Report" method
 local function killTarget(target, remote)
     if shooting[target.humanoid] then return end
     shooting[target.humanoid] = true
     
     task.spawn(function()
         local char = LocalPlayer.Character
-        if not char or not char.Parent then shooting[target.humanoid] = nil; return end
-        local rootPart = char:FindFirstChild("HumanoidRootPart")
+        local rootPart = char and char:FindFirstChild("HumanoidRootPart")
         if not rootPart then shooting[target.humanoid] = nil; return end
-
-        local parts = {}
-        for _, p in ipairs(target.model:GetDescendants()) do if p:IsA("BasePart") then table.insert(parts, p) end end
-        if #parts == 0 and target.parent then
-            for _, p in ipairs(target.parent:GetDescendants()) do if p:IsA("BasePart") then table.insert(parts, p) end end
-        end
-        if #parts == 0 then table.insert(parts, target.model) end
+        
+        -- All coordinates are our own. This should pass all position/distance checks.
+        local selfPos = rootPart.Position
         
         local shots = 0
         while target.humanoid and target.humanoid.Parent and target.humanoid.Health > 0 and shots < 150 do
             shots = shots + 1
             
-            local hitPos = parts[math.random(1, #parts)].Position
-            -- Spoof shooter position to pass server-side distance/LoS checks
-            local spoofedShooterPos = hitPos + (rootPart.Position - hitPos).Unit * 10
-            
             pcall(function()
-                remote:FireServer(target.humanoid, hitPos, spoofedShooterPos)
+                remote:FireServer(target.humanoid, selfPos, selfPos)
             end)
             
             task.wait(0.005)
@@ -115,7 +106,7 @@ end
 
 -- Main loop
 while true do
-    local weapon, remote = getCurrentWeapon()
+    local remote = getCurrentWeapon()
     
     if remote then
         for _, target in ipairs(findTargets()) do
@@ -124,7 +115,6 @@ while true do
         end
     end
     
-    -- Cleanup dead/invalid entries
     for humanoid, _ in pairs(shooting) do
         if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then
             shooting[humanoid] = nil
