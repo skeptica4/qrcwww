@@ -1,120 +1,135 @@
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- Raw lookup tables for performance and brevity
-local WEAPONS = { Akimbo=1, ["Voltaic Impact"]=1, Gunslingers=1, ["Burst Rifle"]=1, Stonewall=1, Steelforge=1, DMR=1, ["Gift of Fire"]=1, ["Armour Peeler"]=1, ["Medical Bow"]=1, Recurve=1, Vitabow=1, Rifle=1, Bolter=1, ["Harpoon Gun"]=1, RPG=1, ["Rocket Stormer"]=1, ["Shockwave Device"]=1, Shotgun=1, Hallsweeper=1, ["Sprinter's Streak"]=1, SMG=1, ["Loose Trigger"]=1, Twinface=1, ["Mastermind's Rifle"]=1, Shovel=1, Overcharger=1, ["Rallying Cry"]=1, Machete=1, Handaxes=1, Torqueblade=1 }
-local EXCLUDED = { Landmine=1, Man=1, Turret=1, Stonehedge=1, Sprayer=1, Sentinel=1, Refugee=1, PDC=1, MADS=1, Lifeline=1, Hallucinator=1, Governor=1, FAST_point=1, Barrier=1, Administrator=1 }
-for i=1,11 do EXCLUDED["dead guy "..i]=1 end
+-- Configuration (kept from original)
+local VALID_WEAPONS = {"Akimbo", "Voltaic Impact", "Gunslingers", "Burst Rifle", "Stonewall", "Steelforge", "DMR", "Gift of Fire", "Armour Peeler", "Medical Bow", "Recurve", "Vitabow", "Rifle", "Bolter", "Harpoon Gun", "RPG", "Rocket Stormer", "Shockwave Device", "Shotgun", "Hallsweeper", "Sprinter's Streak", "SMG", "Loose Trigger", "Twinface", "Mastermind's Rifle", "Shovel", "Overcharger", "Rallying Cry", "Machete", "Handaxes", "Torqueblade"}
+local EXCLUDED = {Landmine=1, Man=1, Turret=1, Stonehedge=1, Sprayer=1, Sentinel=1, Refugee=1, PDC=1, MADS=1, Lifeline=1, Hallucinator=1, Governor=1, FAST_point=1, Barrier=1, Administrator=1}
+for i = 1, 11 do EXCLUDED["dead guy " .. i] = 1 end
+
+local weaponLookup = {}
+for _, name in ipairs(VALID_WEAPONS) do weaponLookup[name] = true end
 
 local shooting = {}
 
--- Data-driven functions for handling special target types
-local TARGET_HANDLERS = {
-	Tank = function(model, targets)
-		for _, child in ipairs(model:GetChildren()) do
-			if child.Name == "PropaneTank" then
-				local humanoid = child:FindFirstChildOfClass("Humanoid")
-				if humanoid and humanoid.Health > 0 then table.insert(targets, {humanoid=humanoid, model=child, parent=model}) end
-			end
-		end
-	end,
-	Platform = function(model, targets)
-		local livingEmplacements = {}
-		for _, child in ipairs(model:GetChildren()) do
-			if child.Name:match("Emplacement%d") then
-				local humanoid = child:FindFirstChildOfClass("Humanoid")
-				if humanoid and humanoid.Health > 0 then table.insert(livingEmplacements, {humanoid=humanoid, model=child, parent=model}) end
-			end
-		end
-
-		if #livingEmplacements > 0 then
-			for _, emp in ipairs(livingEmplacements) do table.insert(targets, emp) end
-		else
-			local humanoid = model:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 then table.insert(targets, {humanoid=humanoid, model=model, parent=model}) end
-		end
-	end,
-	APU = function(model, targets)
-		local pilot = model:FindFirstChild("Pilot")
-		if pilot then
-			local humanoid = pilot:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 then table.insert(targets, {humanoid=humanoid, model=pilot, parent=model}) end
-		end
-	end,
-}
-
-local function getWeapon()
-	local char = LocalPlayer.Character
-	if not char then return nil, nil end
-	for _, tool in ipairs(char:GetChildren()) do
-		if tool:IsA("Tool") and WEAPONS[tool.Name] then
-			local remote = tool:FindFirstChild("VerifyHit")
-			if remote and remote:IsA("RemoteEvent") then return tool, remote end
-		end
-	end
-	return nil, nil
+-- Get current held weapon (efficiently finds first valid tool)
+local function getCurrentWeapon()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") and weaponLookup[tool.Name] then
+            local verifyHit = tool:FindFirstChild("VerifyHit")
+            if verifyHit and verifyHit:IsA("RemoteEvent") then
+                return tool, verifyHit
+            end
+        end
+    end
 end
 
+-- Find all valid targets in workspace (more direct and minimal)
 local function findTargets()
-	local targets = {}
-	if not LocalPlayer.Character then return targets end
+    local targets = {}
+    if not LocalPlayer.Character then return targets end
+    
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj:IsA("Model") and not EXCLUDED[obj.Name] and not Players:GetPlayerFromCharacter(obj) then
+            local humanoid, model, parent
+            
+            if obj.Name == "Platform" then
+                local livingEmplacements = {}
+                for _, child in ipairs(obj:GetChildren()) do
+                    if child.Name:match("Emplacement%d") then
+                        local empHumanoid = child:FindFirstChildOfClass("Humanoid")
+                        if empHumanoid and empHumanoid.Health > 0 then
+                            table.insert(livingEmplacements, {humanoid = empHumanoid, model = child, parent = obj})
+                        end
+                    end
+                end
 
-	for _, obj in ipairs(workspace:GetChildren()) do
-		if obj:IsA("Model") and not EXCLUDED[obj.Name] and not Players:GetPlayerFromCharacter(obj) then
-			local handler = TARGET_HANDLERS[obj.Name]
-			if handler then
-				handler(obj, targets)
-			else -- Default handler for all other models
-				local humanoid = obj:FindFirstChildOfClass("Humanoid")
-				if humanoid and humanoid.Health > 0 then table.insert(targets, {humanoid=humanoid, model=obj, parent=obj}) end
-			end
-		end
-	end
-	return targets
+                if #livingEmplacements > 0 then
+                    for _, emp in ipairs(livingEmplacements) do table.insert(targets, emp) end
+                else
+                    humanoid, model, parent = obj:FindFirstChildOfClass("Humanoid"), obj, obj
+                end
+            elseif obj.Name == "Tank" then
+                for _, child in ipairs(obj:GetChildren()) do
+                    if child.Name == "PropaneTank" then
+                        local tankHumanoid = child:FindFirstChildOfClass("Humanoid")
+                        if tankHumanoid and tankHumanoid.Health > 0 then
+                            table.insert(targets, {humanoid = tankHumanoid, model = child, parent = obj})
+                        end
+                    end
+                end
+            elseif obj.Name == "APU" then
+                local pilot = obj:FindFirstChild("Pilot")
+                if pilot then humanoid, model, parent = pilot:FindFirstChildOfClass("Humanoid"), pilot, obj end
+            else
+                humanoid, model, parent = obj:FindFirstChildOfClass("Humanoid"), obj, obj
+            end
+            
+            if humanoid and humanoid.Health > 0 then
+                table.insert(targets, {humanoid = humanoid, model = model, parent = parent})
+            end
+        end
+    end
+    
+    return targets
 end
 
+-- Kill a target, spoofing position for ranged weapons
 local function killTarget(target, remote)
-	if shooting[target.humanoid] then return end
-	shooting[target.humanoid] = true
+    if shooting[target.humanoid] then return end
+    shooting[target.humanoid] = true
+    
+    task.spawn(function()
+        local char = LocalPlayer.Character
+        if not char or not char.Parent then shooting[target.humanoid] = nil; return end
+        local rootPart = char:FindFirstChild("HumanoidRootPart")
+        if not rootPart then shooting[target.humanoid] = nil; return end
 
-	task.spawn(function()
-		local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if not root then shooting[target.humanoid] = nil; return end
-
-		local parts = {}
-		for _, p in ipairs(target.model:GetDescendants()) do if p:IsA("BasePart") then table.insert(parts, p) end if #parts>=5 then break end end
-		if #parts==0 and target.parent then for _, p in ipairs(target.parent:GetDescendants()) do if p:IsA("BasePart") then table.insert(parts, p) end if #parts>=5 then break end end
-		if #parts==0 then parts = {{Position = target.model:GetPivot().Position}} end
-
-		local shots = 0
-		while target.humanoid and target.humanoid.Parent and target.humanoid.Health > 0 and shots < 150 do
-			shots += 1
-			local part = parts[math.random(#parts)]
-			local hitPos = part.Position + Vector3.new(math.random()-.5, math.random()-.5, math.random()-.5)
-			
-			-- Spoof shooter position to bypass distance/LoS checks
-			local spoofedPos = hitPos + (root.Position - hitPos).Unit * 10
-
-			pcall(remote.FireServer, remote, target.humanoid, hitPos, spoofedPos)
-			task.wait()
-		end
-		shooting[target.humanoid] = nil
-	end)
+        local parts = {}
+        for _, p in ipairs(target.model:GetDescendants()) do if p:IsA("BasePart") then table.insert(parts, p) end end
+        if #parts == 0 and target.parent then
+            for _, p in ipairs(target.parent:GetDescendants()) do if p:IsA("BasePart") then table.insert(parts, p) end end
+        end
+        if #parts == 0 then table.insert(parts, target.model) end
+        
+        local shots = 0
+        while target.humanoid and target.humanoid.Parent and target.humanoid.Health > 0 and shots < 150 do
+            shots = shots + 1
+            
+            local hitPos = parts[math.random(1, #parts)].Position
+            -- Spoof shooter position to pass server-side distance/LoS checks
+            local spoofedShooterPos = hitPos + (rootPart.Position - hitPos).Unit * 10
+            
+            pcall(function()
+                remote:FireServer(target.humanoid, hitPos, spoofedShooterPos)
+            end)
+            
+            task.wait(0.005)
+        end
+        
+        shooting[target.humanoid] = nil
+    end)
 end
 
--- Main Loop
-task.spawn(function()
-	while task.wait(0.1) do
-		for humanoid in pairs(shooting) do
-			if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then shooting[humanoid] = nil end
-		end
-
-		local _, remote = getWeapon()
-		if remote then
-			for _, target in ipairs(findTargets()) do
-				killTarget(target, remote)
-				task.wait(0.01)
-			end
-		end
-	end
-end)
+-- Main loop
+while true do
+    local weapon, remote = getCurrentWeapon()
+    
+    if remote then
+        for _, target in ipairs(findTargets()) do
+            killTarget(target, remote)
+            task.wait(0.01)
+        end
+    end
+    
+    -- Cleanup dead/invalid entries
+    for humanoid, _ in pairs(shooting) do
+        if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then
+            shooting[humanoid] = nil
+        end
+    end
+    
+    task.wait(0.1)
+end
