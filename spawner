@@ -1,7 +1,6 @@
 --[[
-    Standalone Spawner
-    This script provides in-game tool spawning functionality.
-    The original whitelisting system has been removed.
+    Standalone Spawner (Local Commands)
+    This script provides in-game tool spawning functionality using local-only "/e" commands.
 ]]
 
 --================================================================
@@ -39,21 +38,29 @@ end
 local function spawnTool(toolNameToSpawn, targetBackpackToolName)
     print("Spawning tool: " .. tostring(toolNameToSpawn) .. " into " .. tostring(targetBackpackToolName))
 
-    -- Validate input
-    if not toolNameToSpawn or not targetBackpackToolName then
-        warn("Invalid arguments provided to spawnTool. Usage: /spawn ,<ToolName>,<BackpackItem>")
+    -- Validate input by trimming whitespace and checking for nil/empty strings.
+    if not toolNameToSpawn or toolNameToSpawn == "" then
+        warn("Invalid tool name provided.")
+        sendNotification("Spawn Error", "You must provide a tool name.", 5)
+        return
+    end
+    if not targetBackpackToolName or targetBackpackToolName == "" then
+        warn("Invalid backpack item name provided.")
+        sendNotification("Spawn Error", "You must provide a target backpack item.", 5)
         return
     end
 
     local sourceTool = ReplicatedStorage.Tools:FindFirstChild(toolNameToSpawn)
     if not sourceTool then
         warn("Source tool not found in ReplicatedStorage: " .. toolNameToSpawn)
+        sendNotification("Spawn Error", "Tool '" .. toolNameToSpawn .. "' not found.", 5)
         return
     end
 
     local targetTool = LocalPlayer.Backpack:FindFirstChild(targetBackpackToolName)
     if not targetTool then
         warn("Target tool not found in backpack: " .. targetBackpackToolName)
+        sendNotification("Spawn Error", "Backpack item '" .. targetBackpackToolName .. "' not found.", 5)
         return
     end
 
@@ -68,21 +75,32 @@ local function spawnTool(toolNameToSpawn, targetBackpackToolName)
     for _, child in ipairs(sourceTool:GetChildren()) do
         child:Clone().Parent = targetTool
     end
+    
+    sendNotification("Success", "'" .. toolNameToSpawn .. "' has been spawned into '" .. targetBackpackToolName .. "'.", 5)
 end
 
 --================================================================
 -- Main Logic
 --================================================================
 
-sendNotification("Standalone Spawner", "Script loaded successfully for " .. LocalPlayer.Name, 5)
+sendNotification("Standalone Spawner", "Script loaded. Use /e spawn,tool,target", 7)
 
 -- Listen for chat commands from the local player.
 LocalPlayer.Chatted:Connect(function(message)
-    local lowerMessage = string.lower(message)
-    local args = string.split(lowerMessage, " ")
+    -- Only process commands that start with "/e "
+    if string.sub(message, 1, 3) ~= "/e " then
+        return
+    end
 
-    -- Handle the reset command.
-    if lowerMessage == "/e reset" or lowerMessage == "/reset" then
+    -- Extract the command and its arguments
+    local commandString = string.sub(message, 4)
+    local commandArgs = string.split(commandString, ",")
+    
+    -- The first part is the command name, clean it up.
+    local commandName = string.lower(string.gsub(commandArgs[1], "^%s*(.-)%s*$", "%1"))
+
+    -- --- Command: reset ---
+    if commandName == "reset" then
         local remotes = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("To_Server")
         remotes:WaitForChild("Handle_Initiate_S"):FireServer("Add_Knockedout")
         remotes:WaitForChild("Sun_Damage"):FireServer()
@@ -90,17 +108,17 @@ LocalPlayer.Chatted:Connect(function(message)
         remotes:WaitForChild("Sun_Damage"):FireServer()
         wait()
         remotes:WaitForChild("Sun_Damage"):FireServer()
-    end
+        sendNotification("Reset", "Character has been reset.", 3)
+        
+    -- --- Command: spawn ---
+    elseif commandName == "spawn" then
+        -- Arguments are the 2nd and 3rd parts, trim any extra spaces.
+        local toolName = commandArgs[2]
+        local backpackItem = commandArgs[3]
 
-    -- Handle the spawn command. Format: /spawn ,<ToolName>,<BackpackItem>
-    if args[1] == "/spawn" then
-        print("Spawning command received.")
-        local spawnArgs = string.split(message, ",")
-        local toolName = spawnArgs[2]
-        local backpackItem = spawnArgs[3]
-
-        print("Tool: ", toolName)
-        print("Backpack Item: ", backpackItem)
+        if toolName then toolName = string.gsub(toolName, "^%s*(.-)%s*$", "%1") end
+        if backpackItem then backpackItem = string.gsub(backpackItem, "^%s*(.-)%s*$", "%1") end
+        
         spawnTool(toolName, backpackItem)
     end
 end)
