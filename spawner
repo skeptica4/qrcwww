@@ -1,7 +1,6 @@
 --[[
     Standalone Spawner (Local Commands)
     This script provides in-game tool spawning functionality using local-only "/e" commands.
-    It now searches for tools in both ReplicatedStorage.Tools and ReplicatedStorage.Upgrades.
 ]]
 
 --================================================================
@@ -51,14 +50,9 @@ local function spawnTool(toolNameToSpawn, targetBackpackToolName)
         return
     end
 
-    -- Search for the source tool first in ReplicatedStorage.Tools, then in ReplicatedStorage.Upgrades
     local sourceTool = ReplicatedStorage.Tools:FindFirstChild(toolNameToSpawn)
     if not sourceTool then
-        sourceTool = ReplicatedStorage.Upgrades:FindFirstChild(toolNameToSpawn)
-    end
-    
-    if not sourceTool then
-        warn("Source tool not found in ReplicatedStorage (checked Tools and Upgrades): " .. toolNameToSpawn)
+        warn("Source tool not found in ReplicatedStorage: " .. toolNameToSpawn)
         sendNotification("Spawn Error", "Tool '" .. toolNameToSpawn .. "' not found.", 5)
         return
     end
