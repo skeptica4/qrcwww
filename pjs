@@ -1,0 +1,215 @@
+local Mercury = loadstring(game:HttpGet("https://raw.githubusercontent.com/deeeity/mercury-lib/master/src.lua"))()
+
+local GUI = Mercury:Create{
+    Name = "Project Slayers Internal",
+    Size = UDim2.fromOffset(600, 400),
+    Theme = Mercury.Themes.Dark,
+    Link = "https://github.com/deeeity/mercury-lib"
+}
+
+local Tab = GUI:Tab{
+	Name = "Combat",
+	Icon = "rbxassetid://8569322835"
+}
+
+Tab:Button{
+	Name = "Inf Breathing",
+	Description = nil,
+	Callback = function()
+         getrenv()._G.AddBreath("gpthebest", 135) 
+	end
+}
+
+Tab:Button{
+	Name = "Inf Stamina",
+	Description = nil,
+	Callback = function()
+	    getrenv()._G.AddStamina("gpthebest",1000)
+	end
+}
+
+local IsIt = false
+Tab:Button{
+	Name = "enable ren mode (Slayers-Humans only)",
+	Description = nil,
+	Callback = function()
+IsIt = not IsIt
+game:GetService("ReplicatedStorage").Remotes.heart_ablaze_mode_remote:FireServer(IsIt)
+pcall(function()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("swordt1flameasd123asdasd"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("swordt4flameasd123asd"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("Sparkles"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("thajskdasdpasldasd"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("thajskdasdpasldasd"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("spa"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("Sparkles"):Destroy()
+end)
+	end
+}
+
+local OrNot = false
+Tab:Button{
+	Name = "enable god speed (Slayers-Humans only)",
+	Description = nil,
+	Callback = function()
+OrNot = not OrNot
+game:GetService("ReplicatedStorage").Remotes.thundertang123:FireServer(OrNot)
+pcall(function()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("swordt1flameasd123asdasd"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("swordt4flameasd123asd"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("Sparkles"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("thajskdasdpasldasd"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("thajskdasdpasldasd"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("spa"):Destroy()
+game.Players.LocalPlayer.Character.HumanoidRootPart:WaitForChild("Sparkles"):Destroy()
+end)
+	end
+}
+
+local a = {"KnockedOut", "Stun", "FakeStun", "carry_ting_asdasd", "RagDoll", "novelocity","noragdollasdasdasd"}
+Tab:Button{
+	Name = "No Stun",
+	Description = nil,
+	Callback = function()
+    for _,o in pairs(getconnections(game:GetService("ReplicatedStorage").PlayerValues[game.Players.LocalPlayer.Name].ChildAdded)) do 
+        o:Disable()
+    end
+    game:GetService("ReplicatedStorage").PlayerValues[game.Players.LocalPlayer.Name].ChildAdded:Connect(function(child)
+        if table.find(a, child.Name) then 
+            child.Name = "FakeStun"
+            child:Destroy()
+        end
+    end)
+	end
+}
+
+
+Tab:Button{
+	Name = "Force mobs to unblock",
+	Description = nil,
+	Callback = function()
+game.Workspace.Mobs.DescendantAdded:Connect(function(c)
+    if c.Name == "Blocking" then 
+        game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("To_Server"):WaitForChild("Handle_Initiate_S"):FireServer("remove_blocking",c.Parent)
+    end
+end)
+	end
+}
+
+Tab:Toggle{
+	Name = "Give Yata",
+	StartingState = false,
+	Description = nil,
+	Callback = function(state)
+if state == true then
+getgenv().StopGiveYata = false
+while task.wait() do
+pcall(function()
+local args = {
+    [1] = "Yatagarasu_Mask_Weld",
+    [2] = workspace:WaitForChild(game.Players.LocalPlayer.Name),
+    [3] = game:GetService("Players")[game.Players.LocalPlayer.Name].Character.Head,
+    [4] = game:GetService("Players").LocalPlayer.Backpack:FindFirstChild("Map"),
+    [5] = 0
+}
+
+game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("To_Server"):WaitForChild("Handle_Initiate_S_"):InvokeServer(unpack(args))
+end)
+if getgenv().StopGiveYata == true then
+    break;
+end
+end
+else
+getgenv().StopGiveYata = true
+end
+	    end
+}
+
+Tab:Toggle{
+	Name = "Give Champion Scarf",
+	StartingState = false,
+	Description = nil,
+	Callback = function(state)
+if state == true then
+getgenv().StopGiveScarf = false
+while task.wait() do
+pcall(function()
+local args = {
+    [1] = "Champion_Scarf_Weld",
+    [2] = workspace:WaitForChild(game.Players.LocalPlayer.Name),
+    [3] = game:GetService("Players")[game.Players.LocalPlayer.Name].Character.UpperTorso,
+    [4] = game:GetService("Players").LocalPlayer.Backpack:FindFirstChild("Map"),
+    [5] = 0
+}
+
+game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("To_Server"):WaitForChild("Handle_Initiate_S_"):InvokeServer(unpack(args))
+end)
+if getgenv().StopGiveScarf == true then
+    break;
+end
+end
+else
+getgenv().StopGiveScarf = true
+end
+	    end
+}
+
+Tab:Toggle{
+	Name = "Give Champion Necklace",
+	StartingState = false,
+	Description = nil,
+	Callback = function(state)
+if state == true then
+getgenv().StopGiveNecklace = false
+while task.wait() do
+pcall(function()
+local args = {
+    [1] = "Champion_Necklace_Weld",
+    [2] = workspace:WaitForChild(game.Players.LocalPlayer.Name),
+    [3] = game:GetService("Players")[game.Players.LocalPlayer.Name].Character.UpperTorso,
+    [4] = game:GetService("Players").LocalPlayer.Backpack:FindFirstChild("Map"),
+    [5] = 0
+}
+
+game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("To_Server"):WaitForChild("Handle_Initiate_S_"):InvokeServer(unpack(args))
+end)
+if getgenv().StopGiveNecklace == true then
+    break;
+end
+end
+else
+getgenv().StopGiveNecklace = true
+end
+	    end
+}
+
+Tab:Toggle{
+	Name = "Give Hiretsuna Kitsune Mask",
+	StartingState = false,
+	Description = nil,
+	Callback = function(state)
+if state == true then
+getgenv().StopGiveHire = false
+while task.wait() do
+pcall(function()
+local args = {
+    [1] = "Hiretsuna_Kitsune_Mask_Weld",
+    [2] = workspace:WaitForChild(game.Players.LocalPlayer.Name),
+    [3] = game:GetService("Players")[game.Players.LocalPlayer.Name].Character.Head,
+    [4] = game:GetService("Players").LocalPlayer.Backpack:FindFirstChild("Map"),
+    [5] = 0
+}
+
+game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("To_Server"):WaitForChild("Handle_Initiate_S_"):InvokeServer(unpack(args))
+end)
+if getgenv().StopGiveHire == true then
+    break;
+end
+end
+else
+getgenv().StopGiveHire = true
+end
+	    end
+}
+message.txt
+7 KB
