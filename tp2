@@ -2,16 +2,20 @@
 -- CONFIGURATION
 -- =================================================================
 
-local HYBRID_FIRE_RATE = 0.05 -- Delay between hitting different targets in the cycle.
+---
+-- This is now the cooldown BETWEEN massive bursts.
+-- After hitting all NPCs simultaneously, the script will wait this long
+-- before starting the next simultaneous burst.
+---
+local BURST_COOLDOWN = 0.1 -- Set to 1 for a 1-second shovel swing, or lower for guns.
 
 -- =================================================================
--- SERVICES AND CORE VARIABLES
+-- SERVICES AND CORE VARIABLES (Unchanged)
 -- =================================================================
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- The full list of valid weapons to use.
 local VALID_WEAPONS = {
     "Akimbo", "Voltaic Impact", "Gunslingers", "Burst Rifle", "Stonewall",
     "Steelforge", "DMR", "Gift of Fire", "Armour Peeler", "Medical Bow",
@@ -21,26 +25,20 @@ local VALID_WEAPONS = {
     "Mastermind's Rifle", "Shovel", "Overcharger", "Rallying Cry",
     "Machete", "Handaxes", "Torqueblade"
 }
-
--- The list of NPCs to ignore.
 local EXCLUDED = {Landmine=1, Man=1, Turret=1, Stonehedge=1, Sprayer=1, Sentinel=1, Refugee=1, PDC=1, MADS=1, Lifeline=1, Hallucinator=1, Governor=1, FAST_point=1, Barrier=1, Administrator=1}
 for i = 1, 11 do EXCLUDED["dead guy " .. i] = 1 end
 
--- *** CORRECTLY RETAINED: Create a lookup table for fast checking. ***
 local weaponLookup = {}
 for _, name in ipairs(VALID_WEAPONS) do weaponLookup[name] = true end
 
 -- =================================================================
--- HELPER FUNCTIONS
+-- HELPER FUNCTIONS (Unchanged)
 -- =================================================================
 
--- *** CORRECTED: This function now properly uses the weaponLookup table. ***
 local function getCurrentWeapon()
     local char = LocalPlayer.Character
     if not char then return nil, nil end
-    
     for _, tool in ipairs(char:GetChildren()) do
-        -- The check is now more specific: Must be a Tool AND in our weapon list.
         if tool:IsA("Tool") and weaponLookup[tool.Name] then
             local verifyHit = tool:FindFirstChild("VerifyHit")
             if verifyHit and verifyHit:IsA("RemoteEvent") then
@@ -68,27 +66,32 @@ local function findTargets()
 end
 
 -- =================================================================
--- UNIVERSAL ATTACK FUNCTION
+-- THE MODIFIED ATTACK FUNCTION
 -- =================================================================
 
-local function executeRoundRobinPass(targets, remote)
+---
+-- This function fires events at all targets as fast as the client can,
+-- creating a single, massive, simultaneous burst of hits.
+---
+local function executeSimultaneousBurst(targets, remote)
     local char = LocalPlayer.Character
     if not char then return end
     local shooterPos = char.HumanoidRootPart.Position
 
+    -- Loop through every target and fire the remote without any waiting.
     for _, target in ipairs(targets) do
         local partToHit = target.model:FindFirstChild("HumanoidRootPart") or target.model:FindFirstChildOfClass("BasePart")
         if partToHit and target.humanoid.Health > 0 then
             pcall(function()
                 remote:FireServer(target.humanoid, partToHit.Position, shooterPos)
             end)
-            task.wait(HYBRID_FIRE_RATE)
+            -- NO WAIT HERE. All events are fired in one go.
         end
     end
 end
 
 -- =================================================================
--- MAIN LOOP
+-- MAIN LOOP (Modified to control the burst cooldown)
 -- =================================================================
 
 while true do
@@ -97,7 +100,11 @@ while true do
     if weapon and remote then
         local targets = findTargets()
         if #targets > 0 then
-            executeRoundRobinPass(targets, remote)
+            -- 1. Execute the entire simultaneous burst.
+            executeSimultaneousBurst(targets, remote)
+            
+            -- 2. Wait for the cooldown AFTER the burst is complete.
+            task.wait(BURST_COOLDOWN)
         else
             task.wait(0.2)
         end
