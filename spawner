@@ -1,0 +1,106 @@
+--[[
+    Standalone Spawner
+    This script provides in-game tool spawning functionality.
+    The original whitelisting system has been removed.
+]]
+
+--================================================================
+-- Services
+--================================================================
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+
+--================================================================
+-- Local Player
+--================================================================
+local LocalPlayer = Players.LocalPlayer
+
+--================================================================
+-- Helper Functions
+--================================================================
+
+--- Sends a notification to the local player's screen.
+-- @param title The title of the notification.
+-- @param text The body text of the notification.
+-- @param duration The duration in seconds for the notification to be visible.
+local function sendNotification(title, text, duration)
+    StarterGui:SetCore("SendNotification", {
+        Title = title,
+        Text = text,
+        Icon = "rbxassetid://13158724154", -- Notification icon
+        Duration = duration,
+    })
+end
+
+--- Spawns a tool by cloning it from ReplicatedStorage and replacing the contents of a tool in the player's backpack.
+-- @param toolNameToSpawn The name of the tool to clone from ReplicatedStorage.
+-- @param targetBackpackToolName The name of the tool in the player's backpack to be modified.
+local function spawnTool(toolNameToSpawn, targetBackpackToolName)
+    print("Spawning tool: " .. tostring(toolNameToSpawn) .. " into " .. tostring(targetBackpackToolName))
+
+    -- Validate input
+    if not toolNameToSpawn or not targetBackpackToolName then
+        warn("Invalid arguments provided to spawnTool. Usage: /spawn ,<ToolName>,<BackpackItem>")
+        return
+    end
+
+    local sourceTool = ReplicatedStorage.Tools:FindFirstChild(toolNameToSpawn)
+    if not sourceTool then
+        warn("Source tool not found in ReplicatedStorage: " .. toolNameToSpawn)
+        return
+    end
+
+    local targetTool = LocalPlayer.Backpack:FindFirstChild(targetBackpackToolName)
+    if not targetTool then
+        warn("Target tool not found in backpack: " .. targetBackpackToolName)
+        return
+    end
+
+    -- Clear the existing contents of the target tool, but keep the "Id" object if it exists.
+    for _, child in ipairs(targetTool:GetChildren()) do
+        if child.Name ~= "Id" then
+            child:Destroy()
+        end
+    end
+
+    -- Clone the children of the source tool into the target tool.
+    for _, child in ipairs(sourceTool:GetChildren()) do
+        child:Clone().Parent = targetTool
+    end
+end
+
+--================================================================
+-- Main Logic
+--================================================================
+
+sendNotification("Standalone Spawner", "Script loaded successfully for " .. LocalPlayer.Name, 5)
+
+-- Listen for chat commands from the local player.
+LocalPlayer.Chatted:Connect(function(message)
+    local lowerMessage = string.lower(message)
+    local args = string.split(lowerMessage, " ")
+
+    -- Handle the reset command.
+    if lowerMessage == "/e reset" or lowerMessage == "/reset" then
+        local remotes = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("To_Server")
+        remotes:WaitForChild("Handle_Initiate_S"):FireServer("Add_Knockedout")
+        remotes:WaitForChild("Sun_Damage"):FireServer()
+        wait()
+        remotes:WaitForChild("Sun_Damage"):FireServer()
+        wait()
+        remotes:WaitForChild("Sun_Damage"):FireServer()
+    end
+
+    -- Handle the spawn command. Format: /spawn ,<ToolName>,<BackpackItem>
+    if args[1] == "/spawn" then
+        print("Spawning command received.")
+        local spawnArgs = string.split(message, ",")
+        local toolName = spawnArgs[2]
+        local backpackItem = spawnArgs[3]
+
+        print("Tool: ", toolName)
+        print("Backpack Item: ", backpackItem)
+        spawnTool(toolName, backpackItem)
+    end
+end)
