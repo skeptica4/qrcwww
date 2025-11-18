@@ -3,9 +3,12 @@
 -- =================================================================
 
 ---
--- Cooldown BETWEEN massive simultaneous bursts.
--- After hitting all NPCs simultaneously, the script will wait this long
--- before starting the next simultaneous burst.
+-- Number of shots to fire at each target per burst cycle
+---
+local SHOTS_PER_TARGET = 150
+
+---
+-- Cooldown BETWEEN complete burst cycles
 ---
 local BURST_COOLDOWN = 0.1
 
@@ -71,7 +74,7 @@ local function handlePlatform(platform, targets)
     
     -- Step 1: Check ALL Emplacements
     for _, child in ipairs(platform:GetChildren()) do
-        if child.Name:match("Emplacement%d") then  -- Matches Emplacement1, Emplacement2, etc.
+        if child.Name:match("Emplacement%d") then
             local humanoid = child:FindFirstChildOfClass("Humanoid")
             if humanoid then
                 if humanoid.Health > 0 then
@@ -88,12 +91,10 @@ local function handlePlatform(platform, targets)
     
     -- Step 2: Decide what to target
     if not allEmplacementsDead then
-        -- If ANY Emplacement is alive, add ALL living Emplacements
         for _, emplacement in ipairs(livingEmplacements) do
             table.insert(targets, emplacement)
         end
     else
-        -- If ALL Emplacements are dead, target main Platform humanoid
         local platformHumanoid = platform:FindFirstChildOfClass("Humanoid")
         if platformHumanoid and platformHumanoid.Health > 0 then
             table.insert(targets, {
@@ -114,10 +115,8 @@ local function findTargets()
     end
     
     for _, obj in ipairs(workspace:GetChildren()) do
-        -- Skip excluded and player characters
         if obj:IsA("Model") and not EXCLUDED[obj.Name] and not Players:GetPlayerFromCharacter(obj) then
             
-            -- Handle Tank models - look for PropaneTank children
             if obj.Name == "Tank" then
                 for _, child in ipairs(obj:GetChildren()) do
                     if child.Name == "PropaneTank" then
@@ -132,11 +131,9 @@ local function findTargets()
                     end
                 end
                 
-            -- Handle Platform with special conditional logic
             elseif obj.Name == "Platform" then
                 handlePlatform(obj, targets)
                 
-            -- Handle APU models
             elseif obj.Name == "APU" then
                 local pilot = obj:FindFirstChild("Pilot")
                 if pilot then
@@ -150,7 +147,6 @@ local function findTargets()
                     end
                 end
                 
-            -- Handle regular models with direct humanoids
             else
                 local humanoid = obj:FindFirstChildOfClass("Humanoid")
                 if humanoid and humanoid.Health > 0 then
@@ -167,24 +163,13 @@ local function findTargets()
     return targets
 end
 
--- =================================================================
--- SIMULTANEOUS BURST ATTACK FUNCTION
--- =================================================================
-
----
--- This function fires events at all targets simultaneously.
--- Uses the same sophisticated targeting logic as Script 2.
----
-local function executeSimultaneousBurst(targets, remote)
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+-- Prepare target data with parts and positions
+local function prepareTargetData(targets)
+    local targetData = {}
     
-    local shooterPos = char.HumanoidRootPart.Position
-
-    -- Loop through every target and fire the remote instantly
     for _, target in ipairs(targets) do
         if target.humanoid.Parent and target.humanoid.Health > 0 then
-            -- Get parts to shoot at (same logic as Script 2)
+            -- Get parts to shoot at
             local parts = {}
             for _, part in ipairs(target.model:GetDescendants()) do
                 if part:IsA("BasePart") and #parts < 5 then
@@ -192,7 +177,6 @@ local function executeSimultaneousBurst(targets, remote)
                 end
             end
             
-            -- Fallback to parent if no parts found
             if #parts == 0 and target.parent then
                 for _, part in ipairs(target.parent:GetDescendants()) do
                     if part:IsA("BasePart") and #parts < 5 then
@@ -201,25 +185,59 @@ local function executeSimultaneousBurst(targets, remote)
                 end
             end
             
-            -- Final fallback to pivot position
             if #parts == 0 then
                 parts = {{Position = target.model:GetPivot().Position}}
             end
             
-            -- Select random part and add randomized offset
-            local part = parts[math.random(1, #parts)]
-            local hitPos = part.Position + Vector3.new(
-                math.random() * 0.5 - 0.25,
-                math.random() * 0.5 - 0.25,
-                math.random() * 0.5 - 0.25
-            )
-            
-            -- Fire the remote
-            pcall(function()
-                remote:FireServer(target.humanoid, hitPos, shooterPos)
-            end)
-            -- NO WAIT HERE - all events fired simultaneously
+            table.insert(targetData, {
+                humanoid = target.humanoid,
+                parts = parts
+            })
         end
+    end
+    
+    return targetData
+end
+
+-- =================================================================
+-- SIMULTANEOUS BURST ATTACK FUNCTION
+-- =================================================================
+
+---
+-- This function fires multiple shots at ALL targets simultaneously
+-- Each target gets hit SHOTS_PER_TARGET times, but all targets
+-- are being hit at the same time in a synchronized manner
+---
+local function executeSimultaneousBurst(targets, remote)
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    
+    local shooterPos = char.HumanoidRootPart.Position
+    
+    -- Prepare all target data upfront
+    local targetData = prepareTargetData(targets)
+    if #targetData == 0 then return end
+    
+    -- Fire SHOTS_PER_TARGET shots, but cycle through ALL targets each iteration
+    -- This creates true simultaneous sustained fire on all targets
+    for shot = 1, SHOTS_PER_TARGET do
+        for _, data in ipairs(targetData) do
+            if data.humanoid.Parent and data.humanoid.Health > 0 then
+                -- Select random part and add randomized offset
+                local part = data.parts[math.random(1, #data.parts)]
+                local hitPos = part.Position + Vector3.new(
+                    math.random() * 0.5 - 0.25,
+                    math.random() * 0.5 - 0.25,
+                    math.random() * 0.5 - 0.25
+                )
+                
+                -- Fire the remote
+                pcall(function()
+                    remote:FireServer(data.humanoid, hitPos, shooterPos)
+                end)
+            end
+        end
+        -- NO WAIT - all targets hit before moving to next shot iteration
     end
 end
 
@@ -233,10 +251,10 @@ while true do
     if weapon and remote then
         local targets = findTargets()
         if #targets > 0 then
-            -- 1. Execute the entire simultaneous burst with full Script 2 logic
+            -- Execute simultaneous burst on ALL targets
             executeSimultaneousBurst(targets, remote)
             
-            -- 2. Wait for the cooldown AFTER the burst is complete
+            -- Wait after completing the full burst cycle
             task.wait(BURST_COOLDOWN)
         else
             task.wait(0.2)
