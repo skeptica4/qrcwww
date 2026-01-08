@@ -1,47 +1,129 @@
-_G.multiplier = true
+-- Configuration
+local multiplier = true  -- Toggle damage multiplier on/off
 
+-- Implementation with pcall for safety
 pcall(function()
+    -- Get game metatable and make it writable
     local mt = getrawmetatable(game)
-    local old = mt.__namecall
-    local burst = nil
-    
+    local originalReadOnlyState = isreadonly(mt)
     setreadonly(mt, false)
+    
+    -- Store original namecall method
+    local originalNamecall = mt.__namecall
+    
+    -- Active target tracking (simplified)
+    local currentTarget = nil
+    local targetLocked = false
+    local burstActive = false
+    
+    -- Cache frequently used services
+    local Players = game:GetService("Players")
+    local localPlayer = Players.LocalPlayer
+    
+    -- Override namecall method
     mt.__namecall = newcclosure(function(self, ...)
         local method = getnamecallmethod()
         local args = {...}
         
-        if _G.multiplier and method == "FireServer" and tostring(self) == "VerifyHit" then
-            local plr = game.Players.LocalPlayer
-            if plr.Character and self:IsDescendantOf(plr.Character) then
+        -- Check if this is a hit verification and multiplier is enabled
+        if multiplier and method == "FireServer" and tostring(self) == "VerifyHit" then
+            local character = localPlayer.Character
+            
+            if character and self:IsDescendantOf(character) then
                 local target = args[1]
                 
-                if target and target:IsA("Humanoid") and target.Health > 0 then
-                    if burst ~= target then
-                        burst = target
+                if target and target:IsA("Humanoid") then
+                    -- New target detected or target changed
+                    if not burstActive or currentTarget ~= target then
+                        currentTarget = target
+                        targetLocked = true
+                        burstActive = true
                         
+                        local npcParent = target.Parent
+                        local npcName = npcParent and npcParent.Name or "Unknown"
+                        local startingHealth = target.Health
+                        
+                        print("Locking onto " .. npcName .. " (Health: " .. startingHealth .. ")")
+                        
+                        -- Spawn persistent burst loop
                         task.spawn(function()
-                            local hits = 0
-                            while burst == target and target.Parent and target.Health > 0 do
-                                if hits > 150 then break end
-                                hits = hits + 1
-                                
-                                local newArgs = table.clone(args)
-                                if typeof(args[3]) == "Vector3" then
-                                    newArgs[3] = args[3] + Vector3.new(math.random() * 0.01 - 0.005, math.random() * 0.01 - 0.005, math.random() * 0.01 - 0.005)
+                            local hitCount = 1
+                            local activeTarget = currentTarget
+                            
+                            while targetLocked and activeTarget == currentTarget do
+                                -- Check if target is still valid and alive
+                                if not activeTarget.Parent or activeTarget.Health <= 0 then
+                                    print(npcName .. " eliminated after " .. hitCount .. " hits!")
+                                    resetTargetState()
+                                    break
                                 end
                                 
-                                pcall(self.FireServer, self, unpack(newArgs))
+                                -- Continue burst on current target
+                                hitCount = hitCount + 1
+                                
+                                pcall(function()
+                                    -- Create position variation only if needed
+                                    local originalPos = args[3]
+                                    
+                                    if typeof(originalPos) == "Vector3" then
+                                        -- Add tiny random offset
+                                        local variance = 0.01
+                                        local halfVar = variance / 2
+                                        local newPos = Vector3.new(
+                                            originalPos.X + (math.random() * variance - halfVar),
+                                            originalPos.Y + (math.random() * variance - halfVar),
+                                            originalPos.Z + (math.random() * variance - halfVar)
+                                        )
+                                        
+                                        -- Build modified args
+                                        local newArgs = {args[1], args[2], newPos}
+                                        for j = 4, #args do
+                                            newArgs[j] = args[j]
+                                        end
+                                        
+                                        -- Fire server with modified position
+                                        self:FireServer(unpack(newArgs))
+                                    else
+                                        -- Use original args
+                                        self:FireServer(unpack(args))
+                                    end
+                                end)
+                                
+                                -- Safety check
+                                if hitCount > 150 then
+                                    print("Safety limit reached on " .. npcName)
+                                    resetTargetState()
+                                    break
+                                end
+                                
+                                -- Small delay to prevent server overload
                                 task.wait(0.01)
                             end
-                            
-                            if burst == target then burst = nil end
                         end)
                     end
                 end
             end
         end
         
-        return old(self, ...)
+        -- Call original method
+        return originalNamecall(self, ...)
     end)
-    setreadonly(mt, true)
+    
+    -- Helper function to reset target state
+    local function resetTargetState()
+        currentTarget = nil
+        targetLocked = false
+        burstActive = false
+    end
+    
+    -- Restore metatable protection
+    setreadonly(mt, originalReadOnlyState)
+    
+    print("Persistent target burst system " .. (multiplier and "enabled" : "disabled"))
+    print("Will lock onto targets and burst until dead, then auto-switch!")
 end)
+
+-- Error handling
+if not pcall(function() return getrawmetatable(game) end) then
+    print("Error: Unable to access metatable. Script may not work in this environment.")
+end
