@@ -8,6 +8,10 @@ local EXCLUDED_NPCS = {Landmine=1, Man=1, Turret=1, Stonehedge=1, Sprayer=1, Sen
 for i = 1, 11 do EXCLUDED_NPCS["dead guy " .. i] = 1 end
 
 local cachedWeapon, validNPCs, lastFindTime = nil, {}, 0
+local currentTarget, lastAttackTime, attackCount = nil, 0, 0
+
+-- Debug UI elements
+local debugLabel, targetLabel, statsLabel
 
 local findValidTargets = function()
     local char, targets = LocalPlayer.Character, {}
@@ -45,6 +49,15 @@ local findValidTargets = function()
 end
 
 local attack = function(npc)
+    -- Update target info
+    if npc ~= currentTarget then
+        currentTarget = npc
+        attackCount = 0
+        if targetLabel then
+            targetLabel.Text = "Target: " .. (npc.model.Name or "Unknown")
+        end
+    end
+    
     -- Cache weapon if needed
     if not cachedWeapon or not cachedWeapon.Parent then
         local char, backpack = LocalPlayer.Character, LocalPlayer:FindFirstChild("Backpack")
@@ -70,10 +83,25 @@ local attack = function(npc)
     if cachedWeapon and npc.target and npc.target.Parent then
         local verify = cachedWeapon:FindFirstChild("VerifyHit")
         if verify then 
+            attackCount = attackCount + 1
+            lastAttackTime = tick()
+            
             verify:FireServer(npc.target, ("%04x%04x-%04x-%04x-%04x-%04x%08x"):format(
                 math.random(0, 0xffff), math.random(0, 0xffff), math.random(0, 0xffff),
                 bit32.bor(0x4000, math.random(0, 0x0fff)), bit32.bor(0x8000, math.random(0, 0x3fff)),
                 math.random(0, 0xffff), math.random(0, 0xffffffff)))
+                
+            -- Update debug info
+            if statsLabel then
+                local timeSinceLast = tick() - lastAttackTime
+                statsLabel.Text = "Attacks: " .. attackCount .. " | Last: " .. string.format("%.3f", timeSinceLast) .. "s"
+            end
+        else
+            if debugLabel then debugLabel.Text = "DEBUG: No VerifyHit found" end
+        end
+    else
+        if debugLabel then 
+            debugLabel.Text = "DEBUG: Missing weapon or target"
         end
     end
 end
@@ -93,8 +121,20 @@ task.spawn(function()
             end
             
             -- Attack all valid NPCs
-            for i = 1, #validNPCs do 
-                task.spawn(attack, validNPCs[i]) 
+            if #validNPCs > 0 then
+                for i = 1, #validNPCs do 
+                    task.spawn(attack, validNPCs[i]) 
+                end
+            else
+                if debugLabel then debugLabel.Text = "DEBUG: No valid targets" end
+            end
+            
+            -- Check for stuck condition
+            local timeSinceLastAttack = tick() - lastAttackTime
+            if timeSinceLastAttack > 5 and currentTarget then
+                if debugLabel then 
+                    debugLabel.Text = "DEBUG: Stuck on " .. (currentTarget.model.Name or "Unknown") .. " for " .. string.format("%.1f", timeSinceLastAttack) .. "s"
+                end
             end
         end
         task.wait(CONFIG.attackLoopWaitTime)
@@ -119,10 +159,30 @@ if isMobile then
     Instance.new("UICorner", lbl).CornerRadius = UDim.new(0, 10)
     _G.npcCountLabel = lbl
     
+    -- Debug labels
+    debugLabel = Instance.new("TextLabel", gui)
+    debugLabel.Size, debugLabel.Position = UDim2.fromOffset(200, 30), UDim2.fromOffset(10, 460)
+    debugLabel.BackgroundColor3, debugLabel.Text, debugLabel.TextColor3 = Color3.fromRGB(50, 50, 50), "DEBUG: Ready", Color3.new(1, 1, 1)
+    debugLabel.Font, debugLabel.TextSize, debugLabel.BackgroundTransparency = Enum.Font.Gotham, 10, 0.3
+    Instance.new("UICorner", debugLabel).CornerRadius = UDim.new(0, 5)
+    
+    targetLabel = Instance.new("TextLabel", gui)
+    targetLabel.Size, targetLabel.Position = UDim2.fromOffset(200, 30), UDim2.fromOffset(10, 500)
+    targetLabel.BackgroundColor3, targetLabel.Text, targetLabel.TextColor3 = Color3.fromRGB(50, 50, 50), "Target: None", Color3.new(1, 1, 1)
+    targetLabel.Font, targetLabel.TextSize, targetLabel.BackgroundTransparency = Enum.Font.Gotham, 10, 0.3
+    Instance.new("UICorner", targetLabel).CornerRadius = UDim.new(0, 5)
+    
+    statsLabel = Instance.new("TextLabel", gui)
+    statsLabel.Size, statsLabel.Position = UDim2.fromOffset(200, 30), UDim2.fromOffset(10, 540)
+    statsLabel.BackgroundColor3, statsLabel.Text, statsLabel.TextColor3 = Color3.fromRGB(50, 50, 50), "Attacks: 0 | Last: 0.000s", Color3.new(1, 1, 1)
+    statsLabel.Font, statsLabel.TextSize, statsLabel.BackgroundTransparency = Enum.Font.Gotham, 10, 0.3
+    Instance.new("UICorner", statsLabel).CornerRadius = UDim.new(0, 5)
+    
     btn.Activated:Connect(function()
         CONFIG.enabled = not CONFIG.enabled
         btn.Text = CONFIG.enabled and "KILL\nON" or "KILL\nOFF"
         btn.BackgroundColor3 = CONFIG.enabled and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(200, 50, 50)
+        if debugLabel then debugLabel.Text = "DEBUG: " .. (CONFIG.enabled and "Enabled" or "Disabled") end
     end)
 else
     UserInputService.InputBegan:Connect(function(input, proc)
@@ -133,4 +193,4 @@ else
     end)
 end
 
-print("Killaura loaded" .. (isMobile and " (Mobile)" or ""))
+print("Killaura loaded" .. (isMobile and " (Mobile)" or "") .. " with debugging")
